@@ -3158,40 +3158,15 @@ async function resetPassword() {
 
 <!-- === Logo Global + Panel "Logo del Sistema" === -->
 <style>
-  /* Logo flotante global */
-  #globalLogo {
-    position: fixed;
-    top: 10px;
-    left: 15px;
-    max-height: 50px;
-    z-index: 9999;
-  }
-  /* Logo centrado en login */
-  #loginLogo {
-    display: block;
-    margin: 0 auto 20px auto;
-    max-height: 80px;
-  }
-  /* Panel del logo */
-  #logoSystemPanel {
-    margin: 16px 0;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-    padding: 12px;
-    background: #fff;
-    max-width: 500px;
-  }
-  #logoSystemPanel h3 {
-    font-size: 16px;
-    color: #004080;
-    margin-bottom: 10px;
-  }
+  #globalLogo { position: fixed; top: 10px; left: 15px; max-height: 50px; z-index: 9999; }
+  #loginLogo { display: block; margin: 0 auto 20px auto; max-height: 80px; }
+  #logoSystemPanel { margin: 16px 0; border: 1px solid #ccc; border-radius: 8px; padding: 12px; background: #fff; max-width: 500px; }
+  #logoSystemPanel h3 { font-size: 16px; color: #004080; margin-bottom: 10px; }
   #logoPreview { max-height: 80px; margin-bottom: 8px; display: block; }
   .logo-input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
   .logo-actions { margin-top: 8px; display: flex; gap: 8px; }
   .logo-btn { background: #007bff; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
   .logo-btn.secondary { background: #6c757d; }
-  /* Toast flotante */
   #toastContainer { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 8px; }
   .toast-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 220px; opacity: 0.95; }
   .toast-success { background: #28a745; }
@@ -3199,7 +3174,6 @@ async function resetPassword() {
 </style>
 
 <img id="globalLogo" src="https://i.ibb.co/MyywxmcV/Copilot-20251106-123908.png" alt="Logo Global">
-
 <div id="toastContainer"></div>
 
 <script>
@@ -3215,18 +3189,22 @@ async function resetPassword() {
     setTimeout(() => el.remove(), 3000);
   }
 
-async function getFirestoreInstance() {
-  // Usar la instancia que ya inicializaste en el módulo principal
-  if (window.firebaseDb) return window.firebaseDb; 
-  throw new Error("Firestore no disponible");
-}
-
+  // Función corregida para usar sintaxis Modular (v9+)
   async function loadLogo() {
     try {
-      const db = await getFirestoreInstance();
-      const ref = db.collection("config").doc("main");
-      ref.onSnapshot(doc => {
-        const data = doc && doc.exists ? doc.data() : {};
+      // Esperar un poco a que Firebase principal inicialice
+      if (!window.firebaseDb || !window.dbFunctions) {
+        setTimeout(loadLogo, 500); 
+        return;
+      }
+
+      const { doc, onSnapshot, setDoc } = window.dbFunctions;
+      const db = window.firebaseDb;
+      
+      const ref = doc(db, "config", "main");
+      
+      onSnapshot(ref, (docSnap) => {
+        const data = docSnap && docSnap.exists() ? docSnap.data() : {};
         const logo = data.logo || defaultLogo;
         document.querySelectorAll("#globalLogo, #loginLogo").forEach(el => el.src = logo);
       });
@@ -3238,10 +3216,12 @@ async function getFirestoreInstance() {
 
   async function saveLogo(url) {
     try {
-      const db = await getFirestoreInstance();
-      await db.collection("config").doc("main").set({ logo: url }, { merge: true });
-      showToast("Logo actualizado con éxito", "success");
+        const { doc, setDoc } = window.dbFunctions;
+        const db = window.firebaseDb;
+        await setDoc(doc(db, "config", "main"), { logo: url }, { merge: true });
+        showToast("Logo actualizado con éxito", "success");
     } catch(e) {
+      console.error(e);
       showToast("Error al actualizar logo", "error");
     }
   }
