@@ -1,0 +1,3356 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a73e8">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal de Soporte (LumosTicket)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    // Función para eliminar usuario - corregida y movida al lugar correcto
+    async function deleteUser(uid) {
+      if (!confirm("¿Seguro que deseas eliminar este usuario?")) return;
+      try {
+        // Asegurarse de que las funciones de Firebase estén disponibles
+        if (!window.dbFunctions || !window.firebaseDb) {
+          alert("Error: Firebase no está inicializado");
+          return;
+        }
+        
+        const userDoc = window.dbFunctions.doc(window.firebaseDb, "users", uid);
+        await window.dbFunctions.deleteDoc(userDoc);
+        alert("✅ Usuario eliminado correctamente");
+        
+        // Recargar usuarios si la función existe
+        if (typeof loadAllUsers === "function") {
+          loadAllUsers();
+        } else if (typeof updateAgentUsersTab === "function") {
+          updateAgentUsersTab();
+        }
+      } catch (error) {
+        console.error("❌ Error eliminando usuario:", error);
+        alert("Error eliminando usuario: " + error.message);
+      }
+    }
+
+    // Función global para diagnóstico
+    async function diagnosticarFirestore() {
+        console.log("🔍 Iniciando diagnóstico de Firestore...");
+        
+        try {
+            // Verificar que Firebase esté inicializado
+            if (!window.firebaseDb) {
+                console.error("❌ Firestore no está inicializado");
+                alert("❌ Firestore no está inicializado");
+                return false;
+            }
+            
+            console.log("✅ Firestore inicializado correctamente");
+            
+            // Intentar leer un documento de prueba
+            const testRef = window.dbFunctions.doc(window.firebaseDb, "config", "main");
+            const testDoc = await window.dbFunctions.getDoc(testRef);
+            
+            if (testDoc.exists()) {
+                console.log("✅ Conexión a Firestore funcionando");
+                console.log("📊 Configuración:", testDoc.data());
+            } else {
+                console.log("⚠️ Documento de configuración no existe, pero la conexión funciona");
+            }
+            
+            // Verificar la colección de tickets
+            const ticketsRef = window.dbFunctions.collection(window.firebaseDb, "tickets");
+            const ticketsSnapshot = await window.dbFunctions.getDocs(ticketsRef);
+            
+            console.log(`📋 Total de tickets en Firestore: ${ticketsSnapshot.docs.length}`);
+            
+            ticketsSnapshot.docs.forEach(doc => {
+                console.log(`🎫 Ticket: ${doc.id}`, doc.data());
+            });
+            
+            alert(`✅ Diagnóstico completado:\n- Firestore: CONECTADO\n- Tickets encontrados: ${ticketsSnapshot.docs.length}\nRevisa la consola para más detalles.`);
+            
+            // Forzar recarga si hay tickets
+            if (ticketsSnapshot.docs.length > 0 && typeof window.recargarTickets === 'function') {
+                window.recargarTickets();
+            }
+            
+            return true;
+            
+        } catch (error) {
+            console.error("❌ Error en diagnóstico:", error);
+            alert("❌ Error en diagnóstico: " + error.message);
+            return false;
+        }
+    }
+
+    // Función global para forzar recarga
+    window.recargarTickets = function() {
+        console.log("🔄 Forzando recarga de tickets...");
+        if (window.state && window.state.listeners && window.state.listeners.tickets) {
+            window.state.listeners.tickets();
+        }
+        if (typeof window.loadAllTickets === 'function') {
+            window.loadAllTickets();
+        }
+    };
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <!-- Chart.js para gráficos interactivos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script type="module">
+      // Importaciones de Firebase SDK (Versión 11.6.1)
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      import { 
+        getAuth, 
+        onAuthStateChanged, 
+        signInWithEmailAndPassword,
+        createUserWithEmailAndPassword,
+        signOut 
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+      import { 
+        getFirestore, 
+        collection, 
+        doc, 
+        onSnapshot, 
+        addDoc, 
+        setDoc, 
+        deleteDoc, 
+        serverTimestamp, 
+        query, 
+        getDocs, 
+        getDoc, 
+        where, 
+        updateDoc,
+        runTransaction
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+      // Configuración de Firebase
+      const firebaseConfig = {
+        apiKey: "AIzaSyDy0fmjRHJrLd5ZKC5CfvsQ9C12-_x0ha8",
+        authDomain: "lumosticket-e7cdb.firebaseapp.com",
+        projectId: "lumosticket-e7cdb",
+        storageBucket: "lumosticket-e7cdb.firebasestorage.app",
+        messagingSenderId: "1038239511201",
+        appId: "1:1038239511201:web:93ffd371e1409c29c036e0"
+      };
+
+      // Inicializar Firebase
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const db = getFirestore(app);
+
+      // Hacer funciones de Firebase accesibles globalmente
+      window.firebaseApp = app;
+      window.firebaseAuth = auth;
+      window.firebaseDb = db;
+      
+      // Funciones de autenticación
+      window.authFunctions = {
+        signInWithEmail: (email, pass) => signInWithEmailAndPassword(auth, email, pass),
+        createUserWithEmail: (email, pass) => createUserWithEmailAndPassword(auth, email, pass),
+        signOut: () => signOut(auth),
+        onAuthStateChanged: (callback) => onAuthStateChanged(auth, callback)
+      };
+      
+      // Funciones de Firestore
+      window.dbFunctions = {
+        collection, doc, onSnapshot, addDoc, setDoc, deleteDoc, 
+        serverTimestamp, query, getDocs, getDoc, where, updateDoc,
+        runTransaction
+      };
+      
+      console.log("Firebase inicializado correctamente");
+    </script>
+    
+    <style>
+     body { font-family: 'Inter', sans-serif; }
+     .spinner { border: 4px solid var(--color-surface); border-top: 4px solid var(--color-accent); border-radius: 50%; width: 64px; height: 64px; animation: spin 1s linear infinite; }
+     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+     .fade-in { animation: fadeIn 0.5s ease-in-out; }
+     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+     .loading-container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; }
+     .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: white; font-weight: 500; z-index: 1000; transform: translateX(100%); transition: transform 0.3s ease; }
+     .toast.show { transform: translateX(0); }
+     .toast.success { background-color: #10B981; }
+     .toast.error { background-color: #EF4444; }
+     .toast.info { background-color: #3B82F6; }
+     .toast.warning { background-color: #F59E0B; }
+     input.loading { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 11-6.219-8.56'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; background-size: 16px 16px; }
+     .bg-gray-700 { background-color: #374151 !important; }
+     .cursor-not-allowed { cursor: not-allowed !important; }
+     .field-autocompleted { border-color: #10B981 !important; background-color: rgba(16, 185, 129, 0.1) !important; }
+     .transition-all { transition: all 0.3s ease; }
+     .hover-shadow { transition: box-shadow 0.3s ease; }
+     .hover-shadow:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+     input:focus, textarea:focus, select:focus { border-color: var(--color-accent); outline: none; box-shadow: 0 0 0 2px rgba(102, 102, 102, 0.2); }
+     .skeleton { background: linear-gradient(90deg, var(--color-surface-secondary) 25%, var(--color-border) 50%, var(--color-surface-secondary) 75%); background-size: 200% 100%; animation: skeleton-loading 1.5s infinite; }
+     @keyframes skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+     .skeleton-row { height: 40px; margin-bottom: 8px; border-radius: 4px; }
+     
+     /* Estilos adicionales */
+     .error-box { background: rgba(239, 68, 68, 0.1); border-left: 4px solid #EF4444; color: #F87171; padding: 1rem; border-radius: 0.375rem; }
+     .btn-retry { margin-top: 1rem; background-color: #EF4444; color: white; padding: 0.5rem 1rem; border-radius: 0.375rem; }
+     .btn-role { flex: 1; background-color: var(--color-accent); color: var(--color-button-text); padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: bold; transition: transform 0.2s, background-color 0.2s; }
+     .btn-role:hover { transform: scale(1.05); background-color: var(--color-accent-hover); }
+     .btn-role-secondary { flex: 1; background-color: var(--color-surface-secondary); color: var(--color-text-primary); padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: bold; transition: transform 0.2s, background-color 0.2s; }
+     .btn-role-secondary:hover { transform: scale(1.05); background-color: var(--color-border); }
+     .link-secondary { color: var(--color-text-secondary); text-decoration: underline; font-size: 0.875rem; }
+     .link-secondary:hover { color: var(--color-text-primary); }
+     .btn-primary { background-color: var(--color-accent); color: var(--color-button-text); padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: medium; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+     .btn-primary:hover { background-color: var(--color-accent-hover); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
+     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+     .link-accent { color: var(--color-accent); text-decoration: underline; }
+     .link-accent:hover { filter: brightness(1.2); }
+     .card-surface { background-color: var(--color-surface); padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+     .input-style { background-color: var(--color-surface-secondary); border: 1px solid var(--color-border); border-radius: 0.375rem; padding: 0.5rem 0.75rem; color: var(--color-text-primary); }
+     .table-header { font-size: 0.75rem; color: var(--color-text-secondary); text-transform: uppercase; background-color: var(--color-surface-secondary); }
+     .th-style { padding: 0.75rem 1rem; }
+     .table-row { border-bottom: 1px solid var(--color-border); }
+     .table-row:hover { background-color: var(--color-surface-secondary); }
+     .td-style { padding: 0.75rem 1rem; }
+     .btn-secondary { background-color: var(--color-surface-secondary); color: var(--color-text-primary); padding: 0.5rem 1rem; border-radius: 0.375rem; transition: background-color 0.2s; font-weight: 500;}
+     .btn-secondary:hover { background-color: var(--color-border); }
+     .tab-btn { white-space: nowrap; padding: 1rem 0.25rem; border-bottom: 2px solid transparent; font-medium; font-size: 0.875rem; color: var(--color-text-secondary); transition: color 0.2s, border-color 0.2s; }
+     .tab-btn:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+     .tab-btn.border-\[var\(--color-accent\)\] { border-color: var(--color-accent); color: var(--color-accent); }
+     .card-secondary { background-color: var(--color-surface-secondary); padding: 1.5rem; border-radius: 0.5rem; }
+     .label-style { display: block; font-size: 0.875rem; font-medium; color: var(--color-text-secondary); margin-bottom: 0.25rem; }
+     .info-box { border-left: 4px solid #60A5FA; background-color: rgba(96, 165, 250, 0.1); color: #93C5FD; padding: 1rem; border-radius: 0 0.375rem 0.375rem 0; }
+     .btn-info { background-color: #3B82F6; color: white; padding: 0.5rem 1rem; border-radius: 0.375rem; transition: background-color 0.2s; white-space: nowrap; font-weight: 500; }
+     .btn-info:hover { background-color: #2563EB; }
+     .file-input { display: block; width: 100%; font-size: 0.875rem; color: var(--color-text-primary); }
+     .btn-success { background-color: #10B981; color: white; padding: 0.5rem 1rem; border-radius: 0.375rem; transition: background-color 0.2s; font-weight: bold; }
+     .btn-success:hover { background-color: #059669; }
+     .btn-danger { background-color: #EF4444; color: white; padding: 0.25rem 0.75rem; border-radius: 0.375rem; transition: background-color 0.2s; }
+     .btn-danger:hover { background-color: #DC2626; }
+     .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+     .btn-danger-outline { border: 1px solid #EF4444; color: #F87171; padding: 0.25rem 0.75rem; border-radius: 0.375rem; transition: background-color 0.2s, color 0.2s; }
+     .btn-danger-outline:hover { background-color: rgba(239, 68, 68, 0.1); color: #EF4444; }
+     .kpi-card { background-color: var(--color-surface); padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+     .kpi-title { color: var(--color-text-secondary); }
+     .kpi-value { font-size: 2.25rem; font-weight: bold; color: var(--color-text-primary); }
+     .link-success { color: #10B981; text-decoration: underline; }
+     .link-success:hover { color: #059669; }
+     
+     /* Estilos Chat */
+     .chat-fab { position: fixed; bottom: 2rem; right: 2rem; background-color: var(--color-accent); color: var(--color-button-text); width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.2s ease, background-color 0.2s ease; z-index: 1010; border: none; }
+     .chat-fab:hover { transform: scale(1.1); background-color: var(--color-accent-hover); }
+     .chat-window { position: fixed; bottom: 6.5rem; right: 2rem; width: 90%; max-width: 420px; height: 70vh; max-height: 600px; background-color: var(--color-surface); border: 1px solid var(--color-border); border-radius: 1rem; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; overflow: hidden; z-index: 1000; transform-origin: bottom right; transition: transform 0.3s ease, opacity 0.3s ease, width 0.3s ease, height 0.3s ease; }
+     .chat-window.hidden { transform: scale(0); opacity: 0; }
+     .chat-header { background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover)); color: var(--color-button-text); padding: 0.8rem 1rem; border-top-left-radius: 1rem; border-top-right-radius: 1rem; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+     .chat-header h3 { font-weight: 600; font-size: 1.1rem; }
+     .chat-header-buttons button { background: none; border: none; color: var(--color-button-text); opacity: 0.8; cursor: pointer; padding: 0.25rem; transition: opacity 0.2s ease; }
+     .chat-header-buttons button:hover { opacity: 1; }
+     .chat-messages { flex-grow: 1; padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; background-color: var(--color-background); }
+     .chat-message-wrapper { display: flex; width: 100%; }
+     .chat-message-wrapper.user { justify-content: flex-end; }
+     .chat-message-wrapper.bot { justify-content: flex-start; }
+     .chat-message { padding: 0.75rem 1rem; border-radius: 1.1rem; max-width: 80%; word-wrap: break-word; line-height: 1.5; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+     .chat-message.user { background-color: var(--color-accent); color: var(--color-button-text); border-bottom-right-radius: 0.5rem; }
+     .chat-message.bot { background-color: var(--color-surface-secondary); color: var(--color-text-primary); border: 1px solid var(--color-border); border-bottom-left-radius: 0.5rem; }
+     .typing-indicator-container { padding-left: 1rem; padding-bottom: 0.5rem; display: none; }
+     .typing-indicator { display: inline-flex; align-items: center; padding: 0.75rem 1rem; background-color: var(--color-surface-secondary); border: 1px solid var(--color-border); border-radius: 1.1rem; border-bottom-left-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+     .typing-indicator span { animation: bounce 1.4s infinite ease-in-out both; display: inline-block; width: 8px; height: 8px; background-color: var(--color-text-secondary); border-radius: 50%; margin: 0 2px; }
+     .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+     .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+     @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+     .chat-footer { padding: 0.75rem 1rem; border-top: 1px solid var(--color-border); background-color: var(--color-surface); border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem; flex-shrink: 0; }
+     .chat-input-form { display: flex; align-items: center; gap: 0.5rem; }
+     .chat-input { flex-grow: 1; background-color: var(--color-surface-secondary); border: 1px solid var(--color-border); border-radius: 9999px; padding: 0.75rem 1.25rem; color: var(--color-text-primary); outline: none; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+     .chat-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent); }
+     .chat-send-btn { background-color: var(--color-accent); color: var(--color-button-text); border: none; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background-color 0.2s ease; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+     .chat-send-btn:hover { background-color: var(--color-accent-hover); }
+     .chat-send-btn:disabled { background-color: var(--color-border); cursor: not-allowed; }
+     .chat-send-btn svg { width: 1.25rem; height: 1.25rem; }
+     .chat-window.fullscreen { position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; max-height: 100% !important; max-width: 100% !important; border-radius: 0 !important; bottom: 0 !important; right: 0 !important; z-index: 50 !important; }
+     .chat-window.fullscreen .chat-header, .chat-window.fullscreen .chat-footer { border-radius: 0 !important; }
+     .chat-status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; transition: background-color 0.3s ease; }
+     .chat-status-dot.online { background-color: #2ECC71; }
+     .chat-status-dot.offline { background-color: #95A5A6; }
+     
+     /* Estilos para modal de reporte ejecutivo */
+     .modal-reporte-ejecutivo {
+       max-width: 90vw !important;
+       max-height: 85vh !important;
+       overflow-y: auto !important;
+       border-radius: 1rem;
+       box-shadow: 0 0 20px rgba(0,0,0,0.2);
+     }
+     .modal-reporte-content {
+       max-height: calc(85vh - 120px);
+       overflow-y: auto;
+     }
+
+     /* Nuevos estilos para mejoras */
+     .status-indicator { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+     .indicator-dot { width: 8px; height: 8px; border-radius: 50%; }
+     .indicator-dot.online { background-color: #10B981; animation: pulse 2s infinite; }
+     .indicator-dot.offline { background-color: #6B7280; }
+     .indicator-dot.warning { background-color: #F59E0B; }
+     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+     
+     .chart-container { position: relative; height: 300px; width: 100%; }
+     .template-card { cursor: pointer; transition: all 0.2s ease; }
+     .template-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+     .search-highlight { background-color: rgba(255, 255, 0, 0.3); padding: 0 2px; border-radius: 2px; }
+    </style>
+</head>
+<body>
+
+    <main id="app" class="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-[var(--color-background)]">
+        <div class="loading-container fade-in">
+            <div class="spinner"></div>
+            <p>Conectando...</p>
+        </div>
+    </main>
+    <div id="modal-container" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center p-4 z-50"></div>
+    <div id="toast-container"></div>
+    <div id="chat-ui-container"></div>
+
+    <script type="module">
+        // Importar las funciones de los módulos globales
+        const { 
+            firebaseApp, firebaseAuth, firebaseDb, 
+            authFunctions, dbFunctions
+        } = window;
+
+        // Estado global de la aplicación
+        const state = {
+            currentUser: null,
+            userData: null,
+            currentView: "loading",
+            currentAgentTab: 'tickets',
+            config: { theme: 'Gris', logo: '', aiApiKey: '', aiModel: 'gemini-1.5-flash', folioNextNum: 1, folioTemplate: 'TICKET', chatEnabled: true },
+            tickets: [],
+            users: [],
+            comments: {},
+            kpis: { total: 0, resueltos: 0, abiertos: 0 },
+            chatHistory: [],
+            isChatLoading: false,
+            lastUpdate: null,
+            syncInterval: null,
+            filteredTickets: null,
+            
+            listeners: {
+                config: null,
+                tickets: null,
+                users: null,
+                comments: {}
+            }
+        };
+
+        // Hacer el estado globalmente accesible
+        window.state = state;
+
+        const themes = {
+         'Oscuro': { '--color-background': '#000000', '--color-surface': '#111111', '--color-surface-secondary': '#222222', '--color-text-primary': '#FFFFFF', '--color-text-secondary': '#AAAAAA', '--color-accent': '#666666', '--color-accent-hover': '#888888', '--color-border': '#333333', '--color-button-text': '#FFFFFF' },
+         'Gris': { '--color-background': '#000000', '--color-surface': '#1a1a1a', '--color-surface-secondary': '#2d2d2d', '--color-text-primary': '#ffffff', '--color-text-secondary': '#b3b3b3', '--color-accent': '#666666', '--color-accent-hover': '#888888', '--color-border': '#404040', '--color-button-text': '#ffffff' },
+         'Azul': { '--color-background': '#1e40af', '--color-surface': '#1d4ed8', '--color-surface-secondary': '#2563eb', '--color-text-primary': '#FFFFFF', '--color-text-secondary': '#BFDBFE', '--color-accent': '#60A5FA', '--color-accent-hover': '#3B82F6', '--color-border': '#93C5FD', '--color-button-text': '#FFFFFF' },
+         'Verde': { '--color-background': '#047857', '--color-surface': '#059669', '--color-surface-secondary': '#10B981', '--color-text-primary': '#FFFFFF', '--color-text-secondary': '#6EE7B7', '--color-accent': '#34D399', '--color-accent-hover': '#10B981', '--color-border': '#5EEAD4', '--color-button-text': '#FFFFFF' },
+         'Claro': { '--color-background': '#F9FAFB', '--color-surface': '#FFFFFF', '--color-surface-secondary': '#F3F4F6', '--color-text-primary': '#111827', '--color-text-secondary': '#6B7280', '--color-accent': '#9CA3AF', '--color-accent-hover': '#6B7280', '--color-border': '#D1D5DB', '--color-button-text': '#111827' }
+        };
+
+        // --- FUNCIONES UTILITARIAS ---
+
+        function applyTheme(theme) {
+            const root = document.documentElement;
+            const vars = themes[theme] || themes['Gris'];
+            Object.entries(vars).forEach(([k, v]) => root.style.setProperty(k, v));
+        }
+
+        function showToast(message, type = 'success') {
+            const cont = document.getElementById('toast-container'); 
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`; 
+            toast.textContent = message; 
+            cont.appendChild(toast);
+            setTimeout(() => toast.classList.add('show'), 100);
+            setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+        }
+
+        function closeModal() { 
+            const m = document.getElementById("modal-container"); 
+            if (m) { m.classList.add("hidden"); m.classList.remove("flex"); m.innerHTML = ""; } 
+        }
+
+        function showConfirmationModal(message, onConfirm, onCancel = null) {
+            const modal = document.getElementById("modal-container");
+            modal.innerHTML = `<div class="bg-[var(--color-surface-secondary)] rounded-lg shadow-xl w-full max-w-md fade-in"><div class="p-6 border-b border-[var(--color-border)]"><h2 class="text-xl font-bold text-[var(--color-text-primary)]">Confirmar acción</h2></div><div class="p-6"><p class="text-[var(--color-text-primary)] mb-6">${message}</p><div class="flex gap-4"><button type="button" id="confirm-cancel-btn" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white py-2 px-4 rounded-lg transition">Cancelar</button><button type="button" id="confirm-ok-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg transition">Confirmar</button></div></div></div>`;
+            modal.classList.remove("hidden"); modal.classList.add("flex");
+            document.getElementById('confirm-ok-btn').addEventListener('click', () => { closeModal(); if (onConfirm) onConfirm(); });
+            document.getElementById('confirm-cancel-btn').addEventListener('click', () => { closeModal(); if (onCancel) onCancel(); });
+            modal.addEventListener('click', (e) => { if (e.target === modal) { closeModal(); if (onCancel) onCancel(); } });
+        }
+
+        function renderStatusBadge(status) { 
+            const styles = { "NUEVO": "bg-blue-500 text-white", "EN PROGRESO": "bg-yellow-500 text-black", "EN ESPERA": "bg-gray-500 text-white", "RESUELTO": "bg-green-500 text-white", "CERRADO": "bg-red-500 text-white line-through" }; 
+            return `<span class="px-2 py-1 text-xs font-semibold rounded-full ${styles[status] || "bg-gray-700 text-white"}">${status || 'Desconocido'}</span>`; 
+        }
+
+        function renderStatusOptions(current) { 
+            return ["NUEVO", "EN PROGRESO", "EN ESPERA", "RESUELTO", "CERRADO"]
+                   .map(s => `<option value="${s}" ${current === s ? "selected" : ""}>${s}</option>`).join(""); 
+        }
+
+        function formatDateForInput(dateValue) { 
+            if (!dateValue) return ''; 
+            let d;
+            if (dateValue && typeof dateValue.toDate === 'function') {
+                d = dateValue.toDate();
+            } else {
+                d = new Date(dateValue);
+            }
+            return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0]; 
+        }
+
+        // --- NUEVAS FUNCIONES DE SINCRONIZACIÓN MEJORADA ---
+        function startSyncInterval() {
+            // Limpiar intervalo anterior
+            if (state.syncInterval) {
+                clearInterval(state.syncInterval);
+            }
+            
+            // Sincronizar cada 5 minutos (300,000 ms)
+            state.syncInterval = setInterval(() => {
+                if (state.currentView === 'user' && state.currentUser?.email) {
+                    console.log("🔄 Sincronización automática cada 5 min");
+                    loadUserTickets(state.currentUser.email);
+                } else if (state.currentView === 'agent') {
+                    console.log("🔄 Sincronización automática agente cada 5 min");
+                    loadAllTickets();
+                }
+            }, 300000); // 5 minutos
+        }
+
+        function forceSync() {
+            if (state.currentView === 'user' && state.currentUser?.email) {
+                showToast("Sincronizando tickets...", "info");
+                loadUserTickets(state.currentUser.email);
+                updateLastSyncTime();
+            } else if (state.currentView === 'agent') {
+                showToast("Sincronizando todos los tickets...", "info");
+                loadAllTickets();
+                updateLastSyncTime();
+            }
+        }
+
+        function updateLastSyncTime() {
+            const now = new Date();
+            state.lastUpdate = now;
+            
+            // Actualizar UI si existe el elemento
+            const syncTimeEl = document.getElementById('last-sync-time');
+            if (syncTimeEl) {
+                syncTimeEl.textContent = `Última actualización: ${now.toLocaleTimeString()}`;
+            }
+        }
+
+        // --- FUNCIÓN DE ENVÍO DE EMAILS MEJORADA ---
+        async function sendEmailNotification(payload) {
+            const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzIftPk76fLoyYUaZqj6iLBIgKBrw5JI6i8SwAR_aYT0YleFR86djZew-XGbLt_fL_uIg/exec";
+            const PROXY_URL = "https://test.cors.workers.dev/?";
+
+            try {
+                // Determinar tipo de acción para el asunto del email
+                let emailPayload;
+                
+                if (payload.type === "nuevo_ticket") {
+                    emailPayload = {
+                        email: payload.email,
+                        folio: payload.folio,
+                        asunto: payload.asunto,
+                        nombre: payload.nombre,
+                        descripcion: payload.descripcion,
+                        tipoAccion: 'creacion'
+                    };
+                } else if (payload.type === "actualizacion_ticket") {
+                    emailPayload = {
+                        email: payload.email,
+                        folio: payload.folio,
+                        asunto: payload.asunto,
+                        nombre: payload.nombre,
+                        descripcion: payload.descripcion,
+                        tipoAccion: 'actualizacion',
+                        cambios: payload.cambios,
+                        status: payload.nuevoEstado,
+                        agenteEmail: payload.agenteEmail,
+                        agenteNombre: payload.agente
+                    };
+                } else if (payload.type === "comentario_ticket") {
+                    emailPayload = {
+                        email: payload.email,
+                        folio: payload.folio,
+                        asunto: payload.asunto,
+                        nombre: payload.nombre,
+                        descripcion: payload.descripcion,
+                        tipoAccion: 'actualizacion',
+                        cambios: payload.cambios,
+                        status: payload.status,
+                        agenteEmail: payload.agenteEmail,
+                        agenteNombre: payload.agente
+                    };
+                }
+
+                await fetch(PROXY_URL + encodeURIComponent(SCRIPT_URL), {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(emailPayload)
+                });
+                console.log("📧 Notificación por email enviada:", payload.type);
+            } catch (error) {
+                console.error("Error al enviar email:", error);
+            }
+        }
+
+        // --- MANEJO DE ESTADO Y VISTAS ---
+
+        function renderApp() {
+            const appEl = document.getElementById("app");
+            const chatEl = document.getElementById("chat-ui-container");
+            appEl.innerHTML = "";
+            chatEl.innerHTML = "";
+
+            switch (state.currentView) {
+                case 'loading':
+                    appEl.innerHTML = `<div class="loading-container fade-in"><div class="spinner"></div><p>Cargando...</p></div>`;
+                    break;
+                case 'login':
+                    renderLoginView(appEl);
+                    break;
+                case 'user':
+                    renderUserView(appEl);
+                    updateUserUI();
+                    break;
+                case 'agent':
+                    renderAgentView(appEl);
+                    updateAgentDashboard();
+                    break;
+            }
+        }
+        
+        function detachAllListeners() {
+            if(state.listeners.config) state.listeners.config();
+            if(state.listeners.tickets) state.listeners.tickets();
+            if(state.listeners.users) state.listeners.users();
+            
+            Object.values(state.listeners.comments).forEach(unsubscribe => {
+                if (unsubscribe) unsubscribe();
+            });
+            
+            state.listeners = { config: null, tickets: null, users: null, comments: {} };
+            console.log("Listeners de Firestore detenidos.");
+        }
+
+        // --- VISTA LOGIN ---
+
+        function renderLoginView(appEl) {
+            const logoHtml = state.config.logo ? `<img src="${state.config.logo}" alt="Logo" class="w-32 h-32 mx-auto mb-4 rounded-full">` : "";
+            appEl.innerHTML = `
+                <div class="flex flex-col items-center justify-center min-h-[80vh] fade-in">
+                    <div class="w-full max-w-md card-surface space-y-8">
+                        ${logoHtml}
+                        <h1 class="text-3xl font-bold text-center">Soporte Técnico</h1>
+                        <p class="text-[var(--color-text-secondary)] text-center">Inicia sesión con tu cuenta.</p>
+                        <form id="login-form" class="space-y-4">
+                            <div><label class="label-style">Email</label><input type="email" name="email" class="input-style w-full" required></div>
+                            <div><label class="label-style">Contraseña</label><input type="password" name="password" class="input-style w-full" required></div>
+                            <button type="submit" class="btn-primary w-full">Iniciar Sesión</button>
+                        </form>
+                        <p id="login-error" class="text-red-500 text-sm text-center hidden"></p>
+                        <div class="text-center">
+                            <p class="text-sm text-[var(--color-text-secondary)]">¿No tienes cuenta? <a href="#" id="register-link" class="link-accent">Regístrate aquí</a></p>
+                        </div>
+                    </div>
+                </div>`;
+                
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
+            document.getElementById('register-link').addEventListener('click', showRegisterModal);
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const errorP = document.getElementById('login-error');
+            const { email, password } = form.elements;
+            
+            btn.disabled = true;
+            btn.textContent = 'Iniciando...';
+            errorP.classList.add('hidden');
+
+            try {
+                const userCredential = await authFunctions.signInWithEmail(email.value, password.value);
+                showToast(`Bienvenido de vuelta`, 'success');
+            } catch (error) {
+                console.error("Error en login:", error);
+                errorP.textContent = "Credenciales incorrectas o usuario no encontrado.";
+                errorP.classList.remove('hidden');
+                btn.disabled = false;
+                btn.textContent = 'Iniciar Sesión';
+            }
+        }
+
+        function showRegisterModal() {
+            const modal = document.getElementById("modal-container");
+            modal.innerHTML = `
+                <div class="card-surface w-full max-w-md fade-in">
+                    <div class="p-6 border-b flex justify-between items-center"><h2 class="text-xl font-bold">Crear Cuenta</h2><button id="close-modal-btn" class="text-2xl">&times;</button></div>
+                    <div class="p-6">
+                        <form id="register-form" class="space-y-4">
+                            <div><label class="label-style">Nombre completo</label><input type="text" name="nombre" class="input-style w-full" required></div>
+                            <div><label class="label-style">Email</label><input type="email" name="email" class="input-style w-full" required></div>
+                            <div><label class="label-style">Contraseña</label><input type="password" name="password" class="input-style w-full" required minlength="6"></div>
+                            <div><label class="label-style">Confirmar contraseña</label><input type="password" name="confirmPassword" class="input-style w-full" required></div>
+                            <button type="submit" class="btn-primary w-full">Crear Cuenta</button>
+                        </form>
+                        <p id="register-error" class="text-red-500 text-sm text-center hidden mt-2"></p>
+                    </div>
+                </div>`;
+            modal.classList.remove("hidden"); modal.classList.add("flex");
+            
+            document.getElementById('close-modal-btn').addEventListener('click', closeModal);
+            document.getElementById('register-form').addEventListener('submit', handleRegister);
+        }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const errorP = document.getElementById('register-error');
+            const data = Object.fromEntries(new FormData(form));
+            
+            if (data.password !== data.confirmPassword) {
+                errorP.textContent = "Las contraseñas no coinciden.";
+                errorP.classList.remove('hidden');
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = 'Creando...';
+            errorP.classList.add('hidden');
+
+            try {
+                // Crear usuario en Authentication
+                const userCredential = await authFunctions.createUserWithEmail(data.email, data.password);
+                const user = userCredential.user;
+                
+                // Crear documento en Firestore
+                const userRef = dbFunctions.doc(firebaseDb, "users", user.uid);
+                await dbFunctions.setDoc(userRef, {
+                    nombre: data.nombre,
+                    email: data.email,
+                    rol: "usuario",
+                    createdAt: dbFunctions.serverTimestamp()
+                });
+                
+                closeModal();
+                showToast(`Cuenta creada para ${data.nombre}`, 'success');
+                
+            } catch (error) {
+                console.error("Error en registro:", error);
+                errorP.textContent = error.message || "Error al crear la cuenta.";
+                errorP.classList.remove('hidden');
+                btn.disabled = false;
+                btn.textContent = 'Crear Cuenta';
+            }
+        }
+        
+        async function handleLogout() {
+            if (state.syncInterval) {
+                clearInterval(state.syncInterval);
+            }
+            await authFunctions.signOut();
+            detachAllListeners();
+            state.currentUser = null;
+            state.userData = null;
+            state.currentView = 'login';
+            renderApp();
+        }
+
+        // --- VISTA DE USUARIO MEJORADA ---
+
+        function renderUserView(appEl) {
+            appEl.innerHTML = `
+                <div class="fade-in">
+                    <header class="flex justify-between items-center mb-6">
+                        <div>
+                            <h1 class="text-2xl font-bold">Portal de Usuario</h1>
+                            <p class="text-sm text-[var(--color-text-secondary)]">
+                                Hola, ${state.userData?.nombre || state.currentUser?.email} 
+                                (<a href="#" id="logout-btn" class="link-accent">Salir</a>)
+                            </p>
+                            <div class="status-indicators mt-2">
+                                ${renderStatusIndicators()}
+                            </div>
+                        </div>
+                        <button id="sync-btn" class="btn-secondary flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Actualizar
+                        </button>
+                    </header>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        <div class="md:col-span-1 card-surface">
+                            <h2 class="text-xl font-bold mb-4">Crear Ticket</h2>
+                            <form id="new-ticket-form" class="space-y-4">
+                                <div><label class="label-style">Asunto</label><input type="text" name="asunto" class="input-style w-full" required></div>
+                                <div><label class="label-style">Descripción</label><textarea name="descripcion" rows="4" class="input-style w-full" required></textarea></div>
+                                <div><label class="label-style">Categoría</label><select id="category-select" name="categoria" class="input-style w-full" required></select></div>
+                                <div><label class="label-style">Urgencia</label><select name="urgencia" class="input-style w-full" required>
+                                    <option value="">Urgencia...</option>
+                                    <option>Baja</option>
+                                    <option>Media</option>
+                                    <option>Alta</option>
+                                </select></div>
+                                <button type="submit" class="btn-primary w-full">Enviar Ticket</button>
+                            </form>
+                        </div>
+                        <div class="md:col-span-2 card-surface">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-xl font-bold">Mis Tickets</h2>
+                                <span class="text-sm text-[var(--color-text-secondary)]">Sincronización automática cada 5 min</span>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm text-left">
+                                    <thead class="table-header">
+                                        <tr>
+                                            <th class="th-style">Folio</th>
+                                            <th class="th-style">Asunto</th>
+                                            <th class="th-style">Estado</th>
+                                            <th class="th-style">Agente</th>
+                                            <th class="th-style">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="user-ticket-list">
+                                        <tr><td colspan="5" class="td-style text-center">Cargando tickets...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+
+            document.getElementById('logout-btn').addEventListener('click', (e) => { e.preventDefault(); handleLogout(); });
+            document.getElementById('sync-btn').addEventListener('click', forceSync);
+            document.getElementById('new-ticket-form').addEventListener('submit', handleNewTicket);
+            
+            // SOLO RENDERIZAR CHAT SI ESTÁ HABILITADO
+            const chatEl = document.getElementById("chat-ui-container");
+            if (state.config.chatEnabled) {
+                renderChatUI(chatEl);
+            } else {
+                chatEl.innerHTML = '';
+            }
+            
+            // Iniciar sincronización automática
+            startSyncInterval();
+        }
+        
+        function updateUserUI() {
+            const select = document.getElementById("category-select");
+            if (select) {
+                const cats = state.config.categories || ['General', 'Hardware', 'Software', 'Redes'];
+                select.innerHTML = `<option value="">Selecciona categoría...</option>` + 
+                                   cats.map(cat => `<option value="${cat}">${cat}</option>`).join("");
+            }
+            
+            const tbody = document.getElementById("user-ticket-list");
+            if (tbody) {
+                const userEmail = state.currentUser?.email;
+                if (!userEmail) return;
+
+                const ticketsToShow = state.filteredTickets || state.tickets;
+                const userTickets = ticketsToShow.filter(t => t.usuarioEmail?.toLowerCase() === userEmail.toLowerCase());
+                
+                if (userTickets.length > 0) {
+                    tbody.innerHTML = userTickets
+                        .sort((a, b) => (b.createdAt?.toDate() || 0) - (a.createdAt?.toDate() || 0))
+                        .map(t => `
+                            <tr class="table-row">
+                                <td class="td-style font-mono">${t.folio}</td>
+                                <td class="td-style font-medium">${t.asunto}</td>
+                                <td class="td-style">${renderStatusBadge(t.estado)}</td>
+                                <td class="td-style">${t.agente || 'Sin asignar'}</td>
+                                <td class="td-style"><button class="link-accent" data-id="${t.id}">Ver Detalles</button></td>
+                            </tr>
+                        `).join("");
+                        
+                    tbody.querySelectorAll('.link-accent').forEach(btn => {
+                        btn.addEventListener('click', () => showTicketModal(btn.dataset.id));
+                    });
+                        
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="5" class="td-style text-center text-[var(--color-text-secondary)]">Aún no tienes tickets registrados.</td></tr>`;
+                }
+            }
+        }
+        
+        // --- FUNCIÓN MEJORADA PARA CREAR TICKETS CON EMAILS ---
+        async function handleNewTicket(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const data = Object.fromEntries(new FormData(form));
+            
+            if (!data.asunto || !data.descripcion || !data.categoria || !data.urgencia) {
+                showToast("Todos los campos son obligatorios", "error");
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = 'Guardando...';
+            
+            const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzIftPk76fLoyYUaZqj6iLBIgKBrw5JI6i8SwAR_aYT0YleFR86djZew-XGbLt_fL_uIg/exec";
+            const PROXY_URL = "https://test.cors.workers.dev/?";
+
+            let newFolio = "";
+            
+            try {
+                const configRef = dbFunctions.doc(firebaseDb, "config", "main");
+                
+                await dbFunctions.runTransaction(firebaseDb, async (transaction) => {
+                    const configDoc = await transaction.get(configRef);
+                    if (!configDoc.exists()) {
+                        throw new Error("Documento de configuración no encontrado.");
+                    }
+                    
+                    const folioNextNum = (configDoc.data().folioNextNum || 1);
+                    const folioTemplate = (configDoc.data().folioTemplate || "TICKET");
+                    
+                    newFolio = `${folioTemplate}-${String(folioNextNum).padStart(4, '0')}`;
+                    
+                    transaction.update(configRef, { folioNextNum: folioNextNum + 1 });
+                });
+
+                const ticketData = {
+                    ...data,
+                    folio: newFolio,
+                    estado: "NUEVO",
+                    agente: "",
+                    agenteEmail: "",
+                    fechaCompromiso: null,
+                    createdAt: dbFunctions.serverTimestamp(),
+                    usuarioNombre: state.userData?.nombre || state.currentUser?.email,
+                    usuarioEmail: state.currentUser?.email,
+                    usuarioId: state.currentUser?.uid,
+                    departamento: state.userData?.departamento || "N/A"
+                };
+            
+                await dbFunctions.addDoc(dbFunctions.collection(firebaseDb, "tickets"), ticketData);
+                
+                showToast(`Ticket ${newFolio} creado`, 'success');
+                form.reset();
+                
+                // 📧 ENVIAR EMAIL DE NOTIFICACIÓN AL USUARIO
+                const emailPayload = {
+                    type: "nuevo_ticket",
+                    folio: newFolio,
+                    nombre: ticketData.usuarioNombre,
+                    email: ticketData.usuarioEmail,
+                    asunto: ticketData.asunto,
+                    descripcion: ticketData.descripcion,
+                    categoria: ticketData.categoria,
+                    urgencia: ticketData.urgencia
+                };
+                sendEmailNotification(emailPayload);
+
+                // Forzar sincronización inmediata
+                setTimeout(() => {
+                    forceSync();
+                }, 2000);
+                
+            } catch (error) {
+                console.error("Error creando ticket:", error);
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Enviar Ticket';
+            }
+        }
+
+        // --- VISTA DE AGENTE MEJORADA ---
+        
+        function renderAgentView(appEl) {
+             appEl.innerHTML = `
+                <div class="fade-in">
+                    <header class="flex justify-between items-center mb-6">
+                        <div>
+                            <h1 class="text-2xl font-bold">Consola Agente</h1>
+                            <p class="text-sm text-[var(--color-text-secondary)]">
+                                Agente: ${state.userData?.nombre || state.currentUser?.email} 
+                                (<a href="#" id="logout-btn" class="link-accent">Salir</a>)
+                            </p>
+                            <div class="status-indicators mt-2">
+                                ${renderStatusIndicators()}
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <!-- NUEVOS BOTONES AGREGADOS -->
+                            <button id="diagnostic-btn" class="btn-secondary flex items-center gap-2">
+                                🔍 Diagnóstico
+                            </button>
+                            <button id="reporte-ejecutivo-btn" class="btn-info flex items-center gap-2">
+                                📊 Reporte Ejecutivo
+                            </button>
+                            <button id="base-conocimiento-btn" class="btn-secondary flex items-center gap-2">
+                                🧠 Base Conocimiento
+                            </button>
+                            <button id="backup-btn" class="btn-secondary flex items-center gap-2">
+                                💾 Respaldo
+                            </button>
+                            <button id="sync-btn-agent" class="btn-secondary flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Actualizar
+                            </button>
+                        </div>
+                    </header>
+                    <div class="border-b border-[var(--color-border)] mb-4">
+                        <nav class="-mb-px flex space-x-8 overflow-x-auto" id="agent-tabs">
+                            <button data-tab="tickets" class="tab-btn tickets">Tickets</button>
+                            <button data-tab="users" class="tab-btn users">Usuarios</button>
+                            <button data-tab="admin" class="tab-btn admin">Admin</button>
+                        </nav>
+                    </div>
+                    <div id="agent-tab-content"></div>
+                </div>`;
+                
+            document.getElementById('logout-btn').addEventListener('click', (e) => { e.preventDefault(); handleLogout(); });
+            document.getElementById('sync-btn-agent').addEventListener('click', forceSync);
+            document.getElementById('diagnostic-btn').addEventListener('click', () => diagnosticarFirestore());
+            document.getElementById('agent-tabs').addEventListener('click', (e) => {
+                if (e.target.dataset.tab) {
+                    switchAgentTab(e.target.dataset.tab);
+                }
+            });
+            
+            // NUEVOS EVENT LISTENERS
+            document.getElementById('reporte-ejecutivo-btn').addEventListener('click', mostrarReporteEjecutivo);
+            document.getElementById('base-conocimiento-btn').addEventListener('click', mostrarBaseConocimiento);
+            document.getElementById('backup-btn').addEventListener('click', () => window.backupSystem?.exportBackup());
+            
+            switchAgentTab(state.currentAgentTab);
+        }
+
+        function switchAgentTab(tab) {
+            state.currentAgentTab = tab;
+            
+            document.querySelectorAll("#agent-tabs .tab-btn").forEach(btn => {
+                btn.classList.toggle("border-[var(--color-accent)]", btn.dataset.tab === tab);
+                btn.classList.toggle("text-[var(--color-accent)]", btn.dataset.tab === tab);
+            });
+            
+            const content = document.getElementById("agent-tab-content");
+            content.innerHTML = `<div class="loading-container"><div class="spinner"></div></div>`;
+            
+            setTimeout(() => {
+                if (tab === "tickets") {
+                    content.innerHTML = `
+                        <div>
+                            <div id="search-interface"></div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                                <div id="kpi-cards" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
+                                <div class="chart-container">
+                                    <canvas id="tickets-status-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="card-surface">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h2 class="text-xl font-bold">Todos los Tickets</h2>
+                                    <div class="flex gap-2">
+                                        <button onclick="recargarTickets()" class="btn-secondary text-sm">🔄 Forzar Recarga</button>
+                                        <button id="template-btn" class="btn-secondary text-sm">Plantillas</button>
+                                        <button id="export-pdf-btn" class="btn-secondary text-sm">Exportar PDF</button>
+                                    </div>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-sm text-left">
+                                        <thead class="table-header">
+                                            <tr>
+                                                <th class="th-style">Folio</th>
+                                                <th class="th-style">Usuario</th>
+                                                <th class="th-style">Asunto</th>
+                                                <th class="th-style">Estado</th>
+                                                <th class="th-style">Agente</th>
+                                                <th class="th-style">F. Comp.</th>
+                                                <th class="th-style">F. Creac.</th>
+                                                <th class="th-style">Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="agent-ticket-list"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>`;
+                    document.getElementById('export-pdf-btn').addEventListener('click', exportTicketsPDF);
+                    document.getElementById('template-btn').addEventListener('click', () => showTemplateSelector());
+                    updateAgentDashboard();
+                    
+                    // Inicializar búsqueda avanzada
+                    setTimeout(() => {
+                        window.advancedSearch?.renderSearchInterface('search-interface');
+                    }, 100);
+                    
+                    // Renderizar gráficos
+                    setTimeout(() => {
+                        renderInteractiveCharts();
+                    }, 500);
+                } 
+                else if (tab === "users") {
+                    content.innerHTML = `
+                        <div class="card-surface space-y-8">
+                            <h2 class="text-2xl font-bold text-center">Administrar Usuarios</h2>
+                            <div class="card-secondary">
+                                <h3 class="text-lg font-bold mb-4">Usuarios Registrados</h3>
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full divide-y divide-[var(--color-border)]">
+                                        <thead class="table-header">
+                                            <tr>
+                                                <th class="th-style">Nombre</th>
+                                                <th class="th-style">Correo</th>
+                                                <th class="th-style">Rol</th>
+                                                <th class="th-style">Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="users-list" class="divide-y divide-[var(--color-border)]"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>`;
+                    updateAgentUsersTab();
+                } 
+                else if (tab === "admin") {
+                    content.innerHTML = `
+                        <div class="card-surface space-y-6">
+                            <h2 class="text-xl font-bold mb-4">Crear Nuevo Usuario</h2>
+                            <form id="add-user-form" class="space-y-4 max-w-sm">
+                                <div><label class="label-style">Nombre completo</label><input type="text" name="nombre" class="input-style w-full" required></div>
+                                <div><label class="label-style">Email</label><input type="email" name="email" class="input-style w-full" required></div>
+                                <div><label class="label-style">Contraseña</label><input type="password" name="password" class="input-style w-full" required minlength="6"></div>
+                                <div><label class="label-style">Rol</label>
+                                    <select name="rol" class="input-style w-full" required>
+                                        <option value="usuario">Usuario</option>
+                                        <option value="agente">Agente</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn-primary w-full">Crear Usuario</button>
+                            </form>
+                            <hr class="my-6 border-[var(--color-border)]">
+                            
+                            <h2 class="text-xl font-bold mb-4">Configuración General</h2>
+                            <form id="config-form" class="space-y-4 max-w-sm">
+                                <div><label class="label-style">Plantilla Folio (Ej: TOF-TI)</label><input type="text" name="folioTemplate" value="${state.config.folioTemplate || 'TICKET'}" class="input-style w-full" required></div>
+                                <div><label class="label-style">Próximo N° de Folio</label><input type="number" name="folioNextNum" value="${state.config.folioNextNum || 1}" class="input-style w-full" required></div>
+                                <div><label class="label-style">Seleccionar Tema</label><select name="theme" class="input-style w-full" required>${Object.keys(themes).map(t => `<option value="${t}" ${state.config.theme === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+                                <div><label class="label-style">Clave API Gemini</label><input type="text" name="aiApiKey" value="${state.config.aiApiKey || ''}" class="input-style w-full" placeholder="AIzaSy..." disabled></div>
+                                <div><label class="label-style">Modelo Gemini</label>
+                                    <select name="aiModel" class="input-style w-full">
+                                        <option value="gemini-1.5-flash" ${state.config.aiModel === 'gemini-1.5-flash' ? 'selected' : ''}>gemini-1.5-flash (Recomendado)</option>
+                                        <option value="gemini-pro" ${state.config.aiModel === 'gemini-pro' ? 'selected' : ''}>gemini-pro (Estable)</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" name="chatEnabled" id="chat-enabled" ${state.config.chatEnabled ? 'checked' : ''} class="rounded">
+                                    <label for="chat-enabled" class="label-style !mb-0">Habilitar Chat IA para usuarios</label>
+                                </div>
+                                <div><label class="label-style">Categorías (separadas por coma)</label><input type="text" name="categories" value="${(state.config.categories || ['General']).join(',')}" class="input-style w-full"></div>
+                                <div><label class="label-style">Logo (URL o Base64)</label><textarea name="logo" rows="3" class="input-style w-full">${state.config.logo || ''}</textarea></div>
+                                ${state.config.logo ? `<img src="${state.config.logo}" alt="Logo Actual" class="w-32 h-32 mx-auto mt-4 rounded-full object-contain border border-[var(--color-border)]">` : ""}
+                                <button type="submit" class="btn-primary w-full">Guardar Configuración</button>
+                            </form>
+                        </div>`;
+                    
+                    document.getElementById('add-user-form').addEventListener('submit', handleAddUser);
+                    document.getElementById('config-form').addEventListener('submit', handleSaveConfig);
+                }
+            }, 100);
+        }
+        
+        // --- FUNCIÓN MEJORADA PARA CARGAR TICKETS ---
+        function loadAllTickets() {
+            console.log("🔄 Iniciando carga de tickets...");
+            
+            // Detener listener anterior si existe
+            if (state.listeners.tickets) {
+                state.listeners.tickets();
+                console.log("🔴 Listener anterior detenido");
+            }
+            
+            const q = dbFunctions.query(dbFunctions.collection(firebaseDb, "tickets"));
+            
+            state.listeners.tickets = dbFunctions.onSnapshot(q, 
+                (querySnapshot) => {
+                    console.log("✅ Tickets actualizados (Agente):", querySnapshot.docs.length);
+                    
+                    state.tickets = querySnapshot.docs.map(doc => { 
+                        const data = doc.data();
+                        console.log(`🎫 Procesando ticket ${doc.id}:`, {
+                            folio: data.folio,
+                            asunto: data.asunto,
+                            estado: data.estado,
+                            usuarioEmail: data.usuarioEmail
+                        });
+                        return { id: doc.id, ...data }; 
+                    });
+                    
+                    // Calcular KPIs
+                    state.kpis.total = state.tickets.length;
+                    state.kpis.resueltos = state.tickets.filter(t => t.estado === 'RESUELTO').length;
+                    state.kpis.abiertos = state.tickets.filter(t => t.estado !== 'RESUELTO' && t.estado !== 'CERRADO').length;
+                    
+                    console.log("📊 KPIs calculados:", state.kpis);
+                    console.log("📋 Tickets en estado:", state.tickets);
+                    
+                    updateLastSyncTime();
+                    
+                    if (state.currentView === 'agent') {
+                        console.log("🔄 Actualizando dashboard del agente...");
+                        updateAgentDashboard();
+                    }
+                }, 
+                (error) => {
+                    console.error("❌ Error cargando tickets (agente):", error);
+                    showToast("Error al cargar tickets: " + error.message, "error");
+                }
+            );
+            
+            console.log("👂 Listener de tickets iniciado");
+        }
+
+        function updateAgentDashboard() {
+            console.log("🔄 Actualizando dashboard...");
+            console.log("📊 Tickets disponibles:", state.tickets.length);
+            
+            const kpiContainer = document.getElementById("kpi-cards");
+            if (kpiContainer) {
+                kpiContainer.innerHTML = `
+                    <div class="kpi-card">
+                        <h2 class="kpi-title">Total Tickets</h2>
+                        <p class="kpi-value">${state.kpis.total}</p>
+                        <small>Tickets encontrados: ${state.tickets.length}</small>
+                    </div>
+                    <div class="kpi-card">
+                        <h2 class="kpi-title">Tickets Resueltos</h2>
+                        <p class="kpi-value">${state.kpis.resueltos}</p>
+                    </div>
+                    <div class="kpi-card">
+                        <h2 class="kpi-title">Tickets Abiertos</h2>
+                        <p class="kpi-value">${state.kpis.abiertos}</p>
+                    </div>`;
+            }
+            
+            const tbody = document.getElementById("agent-ticket-list");
+            if (tbody) {
+                console.log("🎯 Renderizando tabla de tickets...");
+                
+                const ticketsToShow = state.filteredTickets || state.tickets;
+                console.log("📋 Tickets a mostrar:", ticketsToShow.length);
+                
+                if (ticketsToShow.length > 0) {
+                    // Obtener lista de agentes para el dropdown
+                    const agentes = state.users.filter(u => u.rol === 'agente');
+                    const agentesOptions = agentes.map(a => 
+                        `<option value="${a.nombre}" data-email="${a.email}" ${a.nombre === state.userData?.nombre ? 'selected' : ''}>${a.nombre}</option>`
+                    ).join('');
+                    
+                    tbody.innerHTML = ticketsToShow
+                        .sort((a, b) => {
+                            const dateA = a.createdAt ? a.createdAt.toDate() : new Date(0);
+                            const dateB = b.createdAt ? b.createdAt.toDate() : new Date(0);
+                            return dateB - dateA;
+                        })
+                        .map(t => {
+                            console.log("🎫 Renderizando ticket:", t.folio, t.asunto);
+                            return `
+                            <tr class="table-row">
+                                <td class="td-style font-mono">${t.folio || 'N/A'}</td>
+                                <td class="td-style">
+                                    ${t.usuarioNombre || 'N/A'}<br>
+                                    <span class="text-xs text-[var(--color-text-secondary)]">${t.usuarioEmail || 'N/A'}</span>
+                                </td>
+                                <td class="td-style font-medium">${t.asunto || 'Sin asunto'}</td>
+                                <td class="td-style">
+                                    <select data-id="${t.id}" data-field="estado" class="input-style w-full p-1 text-xs">
+                                        ${renderStatusOptions(t.estado)}
+                                    </select>
+                                </td>
+                                <td class="td-style">
+                                    <select data-id="${t.id}" data-field="agente" class="input-style w-full p-1 text-xs">
+                                        <option value="">Sin asignar</option>
+                                        ${agentesOptions}
+                                    </select>
+                                </td>
+                                <td class="td-style">
+                                    <input type="date" data-id="${t.id}" data-field="fechaCompromiso" 
+                                           value="${t.fechaCompromiso ? formatDateForInput(t.fechaCompromiso) : ''}" 
+                                           class="input-style w-full p-1 text-xs">
+                                </td>
+                                <td class="td-style text-xs">
+                                    ${t.createdAt ? t.createdAt.toDate().toLocaleDateString() : 'N/A'}
+                                </td>
+                                <td class="td-style space-x-2 whitespace-nowrap">
+                                    <button class="link-accent text-xs" data-id="${t.id}">Ver</button>
+                                    <button class="btn-success text-xs" data-id="${t.id}">Guardar</button>
+                                    <button class="btn-danger text-xs" data-id="${t.id}" title="Eliminar Ticket">🗑️</button>
+                                </td>
+                            </tr>
+                        `}).join("");
+                        
+                    // Agregar event listeners
+                    tbody.querySelectorAll('button.link-accent').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            console.log("👁️ Abriendo modal para ticket:", btn.dataset.id);
+                            showTicketModal(btn.dataset.id);
+                        });
+                    });
+                    
+                    tbody.querySelectorAll('button.btn-success').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            console.log("💾 Guardando cambios para ticket:", btn.dataset.id);
+                            saveTicketChanges(btn.dataset.id);
+                        });
+                    });
+                    
+                    tbody.querySelectorAll('button.btn-danger').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            console.log("🗑️ Eliminando ticket:", btn.dataset.id);
+                            confirmDeleteTicket(btn.dataset.id);
+                        });
+                    });
+                    
+                    console.log("✅ Tabla de tickets renderizada correctamente");
+                        
+                } else {
+                    console.log("📭 No hay tickets para mostrar");
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="td-style text-center text-[var(--color-text-secondary)]">
+                                <div class="py-8">
+                                    <p class="text-lg mb-2">📭 No hay tickets para mostrar</p>
+                                    <p class="text-sm">Los tickets aparecerán aquí cuando los usuarios los creen.</p>
+                                    <button onclick="diagnosticarFirestore()" class="btn-secondary mt-4">
+                                        🔍 Ejecutar Diagnóstico
+                                    </button>
+                                    <button onclick="recargarTickets()" class="btn-secondary mt-2 ml-2">
+                                        🔄 Forzar Recarga
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>`;
+                }
+            } else {
+                console.error("❌ No se encontró el elemento agent-ticket-list");
+            }
+        }
+        
+        // --- FUNCIÓN MEJORADA PARA ACTUALIZAR TICKETS CON EMAILS ---
+        async function saveTicketChanges(ticketId) {
+            const status = document.querySelector(`select[data-id="${ticketId}"][data-field="estado"]`).value;
+            const agenteSelect = document.querySelector(`select[data-id="${ticketId}"][data-field="agente"]`);
+            const agente = agenteSelect ? agenteSelect.value : "";
+            const agenteEmail = agenteSelect ? agenteSelect.options[agenteSelect.selectedIndex]?.dataset.email || "" : "";
+            const fechaCompromiso = document.querySelector(`input[data-id="${ticketId}"][data-field="fechaCompromiso"]`).value;
+            
+            const ticketOriginal = state.tickets.find(t => t.id === ticketId);
+            if (!ticketOriginal) return;
+
+            const dataToUpdate = {
+                estado: status,
+                agente: agente,
+                agenteEmail: agenteEmail,
+                fechaCompromiso: fechaCompromiso ? new Date(fechaCompromiso + 'T00:00:00') : null,
+                updatedAt: dbFunctions.serverTimestamp()
+            };
+            
+            try {
+                showToast('Guardando...', 'info');
+                const ticketRef = dbFunctions.doc(firebaseDb, "tickets", ticketId);
+                await dbFunctions.updateDoc(ticketRef, dataToUpdate);
+                showToast('Ticket actualizado', 'success');
+
+                // 📧 ENVIAR EMAIL DE ACTUALIZACIÓN AL USUARIO Y AL AGENTE
+                const cambios = [];
+                if (ticketOriginal.estado !== status) {
+                    cambios.push(`Estado: ${ticketOriginal.estado} → ${status}`);
+                }
+                if (ticketOriginal.agente !== agente) {
+                    cambios.push(`Agente asignado: ${agente || 'Sin asignar'}`);
+                }
+                if (ticketOriginal.fechaCompromiso !== fechaCompromiso) {
+                    cambios.push(`Fecha compromiso: ${fechaCompromiso || 'No definida'}`);
+                }
+
+                if (cambios.length > 0) {
+                    const emailPayload = {
+                        type: "actualizacion_ticket",
+                        folio: ticketOriginal.folio,
+                        nombre: ticketOriginal.usuarioNombre,
+                        email: ticketOriginal.usuarioEmail,
+                        asunto: ticketOriginal.asunto,
+                        descripcion: ticketOriginal.descripcion,
+                        agente: state.userData?.nombre || state.currentUser?.email,
+                        agenteEmail: agenteEmail,
+                        cambios: cambios.join(', '),
+                        nuevoEstado: status
+                    };
+                    sendEmailNotification(emailPayload);
+                }
+                
+            } catch (error) {
+                console.error("Error actualizando ticket:", error);
+                showToast(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        // --- FUNCIÓN PARA ELIMINAR TICKETS (SOLO AGENTES) ---
+        async function confirmDeleteTicket(ticketId) {
+            const ticket = state.tickets.find(t => t.id === ticketId);
+            if (!ticket) return;
+
+            showConfirmationModal(
+                `¿Estás seguro de que deseas eliminar el ticket <strong>${ticket.folio}</strong>?<br><br>
+                 <strong>Asunto:</strong> ${ticket.asunto}<br>
+                 <strong>Usuario:</strong> ${ticket.usuarioNombre}<br><br>
+                 <span class="text-red-500">⚠️ Esta acción no se puede deshacer</span>`,
+                
+                async () => {
+                    // Confirmar eliminación
+                    await deleteTicket(ticketId);
+                },
+                
+                () => {
+                    // Cancelar eliminación
+                    showToast('Eliminación cancelada', 'info');
+                }
+            );
+        }
+
+async function deleteTicket(ticketId) {
+    try {
+        showToast('Eliminando ticket...', 'info');
+
+        // Obtener el ticket actual del estado global
+        const ticket = state.tickets.find(t => t.id === ticketId);
+        
+        // 1. Eliminar todos los comentarios del ticket (si existen)
+        const commentsRef = dbFunctions.collection(firebaseDb, "tickets", ticketId, "comments");
+        const commentsSnapshot = await dbFunctions.getDocs(commentsRef);
+
+        const deleteCommentsPromises = commentsSnapshot.docs.map(doc =>
+            dbFunctions.deleteDoc(dbFunctions.doc(firebaseDb, "tickets", ticketId, "comments", doc.id))
+        );
+
+        await Promise.all(deleteCommentsPromises);
+        console.log(`🗑️ Comentarios eliminados para ticket ${ticketId}`);
+
+        // 2. Eliminar el ticket principal
+        const ticketRef = dbFunctions.doc(firebaseDb, "tickets", ticketId);
+        await dbFunctions.deleteDoc(ticketRef);
+
+        // 3. Actualizar KPIs (solo si el ticket existe)
+        if (ticket) {
+            state.kpis.total = Math.max(0, state.kpis.total - 1);
+            if (ticket.estado === 'RESUELTO') {
+                state.kpis.resueltos = Math.max(0, state.kpis.resueltos - 1);
+            } else {
+                state.kpis.abiertos = Math.max(0, state.kpis.abiertos - 1);
+            }
+        }
+
+        showToast(`Ticket eliminado correctamente`, 'success');
+
+        // 4. Refrescar vista del agente
+        setTimeout(() => {
+            if (state.currentView === 'agent') {
+                updateAgentDashboard();
+            }
+        }, 500);
+
+    } catch (error) {
+        console.error("Error eliminando ticket:", error);
+        showToast(`Error al eliminar ticket: ${error.message}`, 'error');
+    }
+}
+
+        function updateAgentUsersTab() {
+            const tbody = document.getElementById("users-list");
+            if (tbody) {
+                if (state.users.length > 0) {
+                    tbody.innerHTML = state.users.map(u => `
+                        <tr class="table-row">
+                            <td class="td-style">${u.nombre}</td>
+                            <td class="td-style">${u.email}</td>
+                            <td class="td-style">${u.rol}</td>
+                            <td class="td-style">
+                                <button class="btn-danger text-xs" data-id="${u.id}" ${u.id === state.currentUser.uid ? 'disabled' : ''}>Eliminar</button>
+                            </td>
+                        </tr>
+                    `).join("");
+                } else {
+                     tbody.innerHTML = `<tr><td colspan="4" class="td-style text-center">No hay usuarios.</td></tr>`;
+                }
+            }
+        }
+
+        async function handleAddUser(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const data = Object.fromEntries(new FormData(form));
+            
+            btn.disabled = true;
+            btn.textContent = 'Creando...';
+            
+            try {
+                // Crear usuario en Authentication
+                const userCredential = await authFunctions.createUserWithEmail(data.email, data.password);
+                const user = userCredential.user;
+                
+                // Crear documento en Firestore
+                const userRef = dbFunctions.doc(firebaseDb, "users", user.uid);
+                await dbFunctions.setDoc(userRef, {
+                    nombre: data.nombre,
+                    email: data.email,
+                    rol: data.rol,
+                    createdAt: dbFunctions.serverTimestamp()
+                });
+                
+                showToast(`Usuario ${data.nombre} creado como ${data.rol}`, 'success');
+                form.reset();
+                
+            } catch (error) {
+                console.error("Error creando usuario:", error);
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Crear Usuario';
+            }
+        }
+        
+        async function handleSaveConfig(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('button[type="submit"]');
+            const data = Object.fromEntries(new FormData(form));
+            
+            btn.disabled = true;
+            btn.textContent = 'Guardando...';
+            
+            try {
+                const configRef = dbFunctions.doc(firebaseDb, "config", "main");
+                
+                data.folioNextNum = parseInt(data.folioNextNum, 10) || 1;
+                data.categories = data.categories.split(',').map(s => s.trim()).filter(Boolean);
+                // AGREGAR ESTA LÍNEA PARA EL CHAT
+                data.chatEnabled = form.chatEnabled.checked;
+                data.aiApiKey = ""; // Tu API key fija
+                
+                await dbFunctions.setDoc(configRef, data, { merge: true });
+                showToast("Configuración guardada", 'success');
+                
+                // Actualizar visibilidad del chat si es necesario
+                updateChatVisibility();
+                
+            } catch (error) {
+                console.error("Error guardando config:", error);
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Guardar Configuración';
+            }
+        }
+
+        // --- MODAL DE TICKET MEJORADO ---
+        
+        function showTicketModal(ticketId) {
+            const ticket = state.tickets.find(t => t.id === ticketId);
+            if (!ticket) { showToast("Ticket no encontrado", "error"); return; }
+            
+            const modal = document.getElementById("modal-container");
+            const isAgent = state.userData?.rol === 'agente';
+            
+            loadComments(ticketId);
+            
+            const commentsHtml = state.comments[ticketId]
+                ? state.comments[ticketId]
+                    .sort((a, b) => {
+                        const dateA = a.createdAt ? a.createdAt.toDate() : new Date();
+                        const dateB = b.createdAt ? b.createdAt.toDate() : new Date();
+                        return dateA - dateB;
+                    })
+                    .map(c => `
+                        <div class="p-3 rounded-md ${c.autorId === state.currentUser.uid ? "bg-[var(--color-border)]" : "bg-[var(--color-surface)]"}">
+                            <p class="whitespace-pre-wrap">${c.mensaje}</p>
+                            <p class="text-xs text-right mt-1 text-[var(--color-text-secondary)]">
+                                ${c.autorNombre} - ${c.createdAt ? c.createdAt.toDate().toLocaleString() : 'Enviando...'}
+                            </p>
+                        </div>`).join("")
+                : `<p class="text-sm text-center text-[var(--color-text-secondary)]">Cargando comentarios...</p>`;
+            
+            modal.innerHTML = `
+                <div class="card-surface w-full max-w-2xl fade-in">
+                    <div class="p-6 border-b border-[var(--color-border)] flex justify-between items-center">
+                        <h2 class="text-xl font-bold">Detalles del Ticket ${ticket.folio}</h2>
+                        <button id="close-modal-btn" class="text-2xl hover:text-red-500 transition-colors">&times;</button>
+                    </div>
+                    <div class="p-6 max-h-[70vh] overflow-y-auto">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-6 border-b border-[var(--color-border)] pb-4">
+                            <p><strong>Usuario:</strong> ${ticket.usuarioNombre || 'N/A'}</p>
+                            <p><strong>Email:</strong> ${ticket.usuarioEmail || 'N/A'}</p>
+                            <p><strong>Depto:</strong> ${ticket.departamento || 'N/A'}</p>
+                            <p><strong>Categoría:</strong> ${ticket.categoria || 'N/A'}</p>
+                            <p><strong>Urgencia:</strong> ${ticket.urgencia || 'N/A'}</p>
+                            <p><strong>Fecha Creación:</strong> ${ticket.createdAt ? ticket.createdAt.toDate().toLocaleString() : 'N/A'}</p>
+                            <p><strong>Estado Actual:</strong> ${renderStatusBadge(ticket.estado)}</p>
+                            <p><strong>Agente Asignado:</strong> ${ticket.agente || 'N/A'}</p>
+                            <p><strong>Fecha Compromiso:</strong> ${ticket.fechaCompromiso ? formatDateForInput(ticket.fechaCompromiso) : "N/A"}</p>
+                        </div>
+                        <div class="mb-4"><p class="font-bold text-base mb-1">Asunto:</p><p>${ticket.asunto || 'Sin asunto'}</p></div>
+                        <div class="mb-6"><p class="font-bold text-base mb-1">Descripción:</p><div class="card-secondary p-3 mt-1 whitespace-pre-wrap">${ticket.descripcion || 'Sin descripción'}</div></div>
+                        
+                        <div class="border-t border-[var(--color-border)] pt-4">
+                            <h3 class="font-bold text-base mb-3">Historial de Comentarios</h3>
+                            <div id="comments-list" class="space-y-3 mb-4">${commentsHtml}</div>
+                            <form id="comment-form" data-id="${ticketId}">
+                                <div><label class="label-style">Añadir Comentario:</label><textarea name="mensaje" rows="3" class="input-style w-full" required placeholder="Escribe tu comentario aquí..."></textarea></div>
+                                <button type="submit" class="btn-primary w-full mt-2">Enviar Comentario</button>
+                            </form>
+                        </div>
+                        ${isAgent ? `
+                        <div class="mt-6 pt-4 border-t border-[var(--color-border)] flex gap-2">
+                            <button id="print-sheet-btn" class="btn-secondary flex-1">Imprimir Hoja de Servicio</button>
+                            <button id="delete-ticket-btn" class="btn-danger flex-1" data-id="${ticketId}">Eliminar Ticket</button>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>`;
+            modal.classList.remove("hidden"); modal.classList.add("flex");
+            
+            document.getElementById('close-modal-btn').addEventListener('click', () => {
+                detachCommentListener(ticketId);
+                closeModal();
+            });
+            document.getElementById('comment-form').addEventListener('submit', (e) => handleAddComment(e, ticket));
+            if (isAgent) {
+                document.getElementById('print-sheet-btn').addEventListener('click', () => printServiceSheet(ticket));
+                document.getElementById('delete-ticket-btn').addEventListener('click', () => {
+                    closeModal();
+                    setTimeout(() => confirmDeleteTicket(ticketId), 300);
+                });
+            }
+        }
+        
+        // --- FUNCIÓN MEJORADA PARA AGREGAR COMENTARIOS CON NOTIFICACIÓN ---
+        async function handleAddComment(e, ticket) {
+            e.preventDefault();
+            const form = e.target;
+            const ticketId = form.dataset.id;
+            const btn = form.querySelector('button[type="submit"]');
+            const textarea = form.mensaje;
+            
+            const mensaje = textarea.value.trim();
+            if (!mensaje) return;
+            
+            btn.disabled = true;
+            btn.textContent = 'Enviando...';
+            
+            try {
+                const commentData = {
+                    mensaje: mensaje,
+                    autorId: state.currentUser.uid,
+                    autorNombre: state.userData?.nombre || state.currentUser?.email,
+                    autorEmail: state.currentUser.email,
+                    createdAt: dbFunctions.serverTimestamp()
+                };
+                
+                const commentsRef = dbFunctions.collection(firebaseDb, "tickets", ticketId, "comments");
+                await dbFunctions.addDoc(commentsRef, commentData);
+                
+                // 📧 ENVIAR EMAIL DE NOTIFICACIÓN POR COMENTARIO
+                const emailPayload = {
+                    type: "comentario_ticket",
+                    folio: ticket.folio,
+                    nombre: ticket.usuarioNombre,
+                    email: ticket.usuarioEmail,
+                    asunto: ticket.asunto,
+                    descripcion: ticket.descripcion,
+                    cambios: `Nuevo comentario agregado por ${state.userData?.nombre || state.currentUser?.email}: "${mensaje}"`,
+                    status: ticket.estado,
+                    agente: state.userData?.nombre || state.currentUser?.email,
+                    agenteEmail: state.currentUser.email
+                };
+                sendEmailNotification(emailPayload);
+                
+                textarea.value = '';
+                showToast('Comentario agregado y notificación enviada', 'success');
+                
+            } catch (error) {
+                console.error("Error añadiendo comentario:", error);
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Enviar Comentario';
+            }
+        }
+
+        // --- FUNCIÓN PARA IMPRIMIR HOJA DE SERVICIO ---
+        function printServiceSheet(ticket) {
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                // Configuración inicial
+                doc.setFontSize(16);
+                doc.setFont(undefined, 'bold');
+                doc.setTextColor(40, 40, 40);
+                
+                // Encabezado
+                doc.text("HOJA DE SERVICIO TÉCNICO", 105, 20, { align: 'center' });
+                
+                // Línea separadora
+                doc.setDrawColor(200, 200, 200);
+                doc.line(20, 25, 190, 25);
+                
+                // Información del Ticket
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'bold');
+                doc.text("INFORMACIÓN DEL TICKET", 20, 35);
+                
+                doc.setFont(undefined, 'normal');
+                let yPosition = 45;
+                
+                // Datos del ticket en dos columnas
+                const leftColumn = [
+                    `Folio: ${ticket.folio || 'N/A'}`,
+                    `Fecha: ${ticket.createdAt ? ticket.createdAt.toDate().toLocaleDateString() : 'N/A'}`,
+                    `Usuario: ${ticket.usuarioNombre || 'N/A'}`,
+                    `Departamento: ${ticket.departamento || 'N/A'}`,
+                    `Categoría: ${ticket.categoria || 'N/A'}`
+                ];
+                
+                const rightColumn = [
+                    `Estado: ${ticket.estado || 'N/A'}`,
+                    `Prioridad: ${ticket.urgencia || 'N/A'}`,
+                    `Agente: ${ticket.agente || 'Sin asignar'}`,
+                    `Email: ${ticket.usuarioEmail || 'N/A'}`,
+                    `Fecha Compromiso: ${ticket.fechaCompromiso ? ticket.fechaCompromiso.toDate().toLocaleDateString() : 'N/A'}`
+                ];
+                
+                // Imprimir columnas
+                leftColumn.forEach((text, index) => {
+                    doc.text(text, 20, yPosition + (index * 7));
+                });
+                
+                rightColumn.forEach((text, index) => {
+                    doc.text(text, 110, yPosition + (index * 7));
+                });
+                
+                yPosition += 40;
+                
+                // Asunto
+                doc.setFont(undefined, 'bold');
+                doc.text("ASUNTO:", 20, yPosition);
+                doc.setFont(undefined, 'normal');
+                const asuntoLines = doc.splitTextToSize(ticket.asunto || 'Sin asunto', 170);
+                doc.text(asuntoLines, 20, yPosition + 7);
+                yPosition += 7 + (asuntoLines.length * 5) + 5;
+                
+                // Descripción
+                doc.setFont(undefined, 'bold');
+                doc.text("DESCRIPCIÓN DEL PROBLEMA:", 20, yPosition);
+                doc.setFont(undefined, 'normal');
+                const descLines = doc.splitTextToSize(ticket.descripcion || 'Sin descripción', 170);
+                doc.text(descLines, 20, yPosition + 7);
+                yPosition += 7 + (descLines.length * 5) + 10;
+                
+                // Comentarios (si existen)
+                const ticketComments = state.comments[ticket.id];
+                if (ticketComments && ticketComments.length > 0) {
+                    doc.setFont(undefined, 'bold');
+                    doc.text("COMENTARIOS Y SEGUIMIENTO:", 20, yPosition);
+                    doc.setFont(undefined, 'normal');
+                    yPosition += 7;
+                    
+                    let commentCount = 0;
+                    ticketComments
+                        .sort((a, b) => {
+                            const dateA = a.createdAt ? a.createdAt.toDate() : new Date();
+                            const dateB = b.createdAt ? b.createdAt.toDate() : new Date();
+                            return dateA - dateB;
+                        })
+                        .forEach(comment => {
+                            if (yPosition > 250 || commentCount >= 3) return; // Limitar comentarios para que quepan en una página
+                            
+                            const commentHeader = `${comment.autorNombre} - ${comment.createdAt ? comment.createdAt.toDate().toLocaleString() : 'N/A'}`;
+                            doc.setFontSize(9);
+                            doc.text(commentHeader, 20, yPosition);
+                            yPosition += 4;
+                            
+                            const commentLines = doc.splitTextToSize(comment.mensaje, 170);
+                            doc.setFontSize(8);
+                            doc.text(commentLines, 25, yPosition);
+                            yPosition += (commentLines.length * 3) + 5;
+                            commentCount++;
+                        });
+                    
+                    doc.setFontSize(12);
+                    yPosition += 5;
+                }
+                
+                // Línea separadora antes de firmas
+                doc.setDrawColor(200, 200, 200);
+                doc.line(20, yPosition, 190, yPosition);
+                yPosition += 10;
+                
+                // Firmas
+                doc.setFont(undefined, 'bold');
+                doc.text("FIRMAS", 105, yPosition, { align: 'center' });
+                yPosition += 15;
+                
+                // Firma del usuario
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                doc.text("USUARIO QUE REPORTÓ EL SERVICIO", 55, yPosition, { align: 'center' });
+                doc.setFont(undefined, 'normal');
+                doc.text(`Nombre: ${ticket.usuarioNombre || 'N/A'}`, 55, yPosition + 10, { align: 'center' });
+                doc.text("Firma: _________________________", 55, yPosition + 25, { align: 'center' });
+                doc.text("Fecha: _________________________", 55, yPosition + 35, { align: 'center' });
+                
+                // Firma del agente
+                doc.setFont(undefined, 'bold');
+                doc.text("AGENTE DE SOPORTE", 155, yPosition, { align: 'center' });
+                doc.setFont(undefined, 'normal');
+                doc.text(`Nombre: ${ticket.agente || 'Sin asignar'}`, 155, yPosition + 10, { align: 'center' });
+                doc.text("Firma: _________________________", 155, yPosition + 25, { align: 'center' });
+                doc.text("Fecha: _________________________", 155, yPosition + 35, { align: 'center' });
+                
+                // Pie de página
+                yPosition += 50;
+                doc.setFontSize(8);
+                doc.setTextColor(100, 100, 100);
+                doc.text("Documento generado automáticamente por LumosTicket - " + new Date().toLocaleString(), 105, yPosition, { align: 'center' });
+                
+                // Guardar el PDF
+                doc.save(`hoja_servicio_${ticket.folio}.pdf`);
+                showToast("Hoja de servicio generada correctamente", "success");
+                
+            } catch (error) {
+                console.error("Error generando hoja de servicio:", error);
+                showToast("Error al generar la hoja de servicio", "error");
+            }
+        }
+        
+        // --- FUNCIONES DE CHAT (IA) ---
+        
+        function renderChatUI(chatEl) {
+            chatEl.innerHTML = `
+            <button id="chat-fab" class="chat-fab" title="Abrir Chat de Soporte">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 5.523-4.477 10-10 10S1 17.523 1 12 5.477 2 11 2s10 4.477 10 10z" /></svg>
+            </button>
+            <div id="chat-window" class="chat-window hidden">
+                <header class="chat-header">
+                    <div class="flex items-center space-x-2"><span id="ai-status-dot" class="chat-status-dot online"></span><h3>Pixel-Bot</h3></div>
+                    <div class="chat-header-buttons flex items-center space-x-2">
+                        <button id="fullscreen-btn" title="Pantalla Completa"><svg id="icon-expand" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5v4m0 0h4" /></svg><svg id="icon-compress" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-4-4m0 0l-4 4m4-4V3m0 0l4 4m-4-4L7 7" /></svg></button>
+                        <button id="close-chat-btn" title="Cerrar Chat"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                    </div>
+                </header>
+                <div id="chat-messages" class="chat-messages"></div>
+                <div id="typing-indicator" class="typing-indicator-container"><div class="typing-indicator"><span></span><span></span><span></span></div></div>
+                <footer class="chat-footer"><form id="chat-input-form" class="chat-input-form"><input type="text" id="chat-input" placeholder="Escribe tu mensaje..." autocomplete="off" class="chat-input"><button type="submit" id="chat-send-btn" class="chat-send-btn" title="Enviar Mensaje"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg></button></form></footer>
+            </div>`;
+            
+        document.getElementById('chat-fab')?.addEventListener('click', toggleChatWindow);
+        document.getElementById('close-chat-btn')?.addEventListener('click', toggleChatWindow);
+        document.getElementById('chat-input-form')?.addEventListener('submit', handleChatSubmit);
+        document.getElementById('fullscreen-btn')?.addEventListener('click', toggleChatFullscreen);
+
+        updateChatMessages();
+        if (state.chatHistory.length === 0) {
+            const initialMessage = "¡Hola! Soy Pixel-Bot, tu asistente de TI. ¿En qué puedo ayudarte hoy?";
+            addMessageToChat('bot', initialMessage); 
+            state.chatHistory.push({ role: 'model', text: initialMessage }); 
+        }
+    }
+
+    function toggleChatWindow() {
+        const windowEl = document.getElementById('chat-window'); 
+        const fabEl = document.getElementById('chat-fab');
+        if (windowEl) { 
+            const isOpening = windowEl.classList.contains('hidden'); 
+            windowEl.classList.toggle('hidden'); 
+            if (fabEl) { 
+                fabEl.classList.toggle('hidden', isOpening); 
+            }
+            if (isOpening && state.chatHistory.length === 0) { 
+                const messagesContainer = document.getElementById('chat-messages'); 
+                if (messagesContainer && messagesContainer.children.length === 0) { 
+                    const initialMessage = "¡Hola! Soy Pixel-Bot, tu asistente de TI. ¿En qué puedo ayudarte hoy?"; 
+                    addMessageToChat('bot', initialMessage); 
+                    state.chatHistory.push({ role: 'model', text: initialMessage }); 
+                } 
+            } else if (isOpening) { 
+                scrollToBottom(); 
+                document.getElementById('chat-input')?.focus(); 
+            } 
+        }
+    }
+
+    async function handleChatSubmit(e) {
+        e.preventDefault();
+        const input = document.getElementById('chat-input'); 
+        const sendBtn = document.getElementById('chat-send-btn'); 
+        const typingIndicatorEl = document.getElementById('typing-indicator');
+        const userMessage = input.value.trim();
+        if (!userMessage || state.isChatLoading) return;
+        state.isChatLoading = true; 
+        input.value = ''; 
+        input.disabled = true; 
+        sendBtn.disabled = true;
+        state.chatHistory.push({ role: 'user', text: userMessage });
+        addMessageToChat('user', userMessage);
+        if (typingIndicatorEl) typingIndicatorEl.style.display = 'block';
+        scrollToBottom();
+        const botResponseText = await getGeminiResponse([...state.chatHistory]);
+        if (typingIndicatorEl) typingIndicatorEl.style.display = 'none';
+        await handleBotResponse(botResponseText);
+        state.isChatLoading = false; 
+        input.disabled = false; 
+        sendBtn.disabled = false; 
+        input.focus();
+    }
+
+    async function handleBotResponse(botMessage) {
+        const messageContainer = document.getElementById('chat-messages'); 
+        if (!messageContainer) return;
+        const messageWrapper = document.createElement('div'); 
+        messageWrapper.className = 'chat-message-wrapper bot';
+        const messageElement = document.createElement('div'); 
+        messageElement.className = 'chat-message bot';
+        messageWrapper.appendChild(messageElement); 
+        messageContainer.appendChild(messageWrapper);
+        scrollToBottom();
+        messageElement.innerHTML = botMessage.replace(/\n/g, '<br>');
+        scrollToBottom();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        state.chatHistory.push({ role: 'model', text: botMessage });
+    }
+
+    function updateChatMessages() {
+        const messagesContainer = document.getElementById('chat-messages'); 
+        if (!messagesContainer) return;
+        messagesContainer.innerHTML = '';
+        state.chatHistory.forEach(msg => { 
+            addMessageToChat(msg.role === 'model' ? 'bot' : 'user', msg.text); 
+        });
+        scrollToBottom();
+    }
+
+    function addMessageToChat(sender, message) {
+        const messagesContainer = document.getElementById('chat-messages'); 
+        if (!messagesContainer) return;
+        const wrapper = document.createElement('div'); 
+        wrapper.className = `chat-message-wrapper ${sender}`;
+        const bubble = document.createElement('div'); 
+        bubble.className = `chat-message ${sender}`;
+        bubble.innerHTML = message.replace(/\n/g, '<br>');
+        wrapper.appendChild(bubble); 
+        messagesContainer.appendChild(wrapper); 
+        scrollToBottom();
+    }
+
+    function scrollToBottom() {
+        const messagesContainer = document.getElementById('chat-messages');
+        if (messagesContainer) { 
+            setTimeout(() => { 
+                messagesContainer.scrollTop = messagesContainer.scrollHeight; 
+            }, 50); 
+        }
+    }
+
+    function toggleChatFullscreen() {
+        const windowEl = document.getElementById('chat-window'); 
+        const iconExpandEl = document.getElementById('icon-expand'); 
+        const iconCompressEl = document.getElementById('icon-compress');
+        if (windowEl) { 
+            windowEl.classList.toggle('fullscreen'); 
+            const isFullscreen = windowEl.classList.contains('fullscreen'); 
+            if (iconExpandEl) iconExpandEl.classList.toggle('hidden', isFullscreen); 
+            if (iconCompressEl) iconCompressEl.classList.toggle('hidden', !isFullscreen); 
+        }
+    }
+
+ async function getGeminiResponse(chatHistoryForAPI) {
+        // Formatear el historial para enviarlo al backend
+        const contents = chatHistoryForAPI.map(msg => ({ 
+            role: msg.role === 'model' ? 'model' : 'user', 
+            parts: [{ text: msg.text }] 
+        }));
+
+        // Instrucción del sistema (asegúrate de incluirla en contents o manejarla aquí)
+        const systemInstruction = { 
+            role: "user", 
+            parts: [{ 
+                "text": "Eres un asistente de TI profesional y servicial... (TU PROMPT LARGO AQUÍ)..." 
+            }] 
+        };
+        
+        // Colocamos la instrucción al principio
+        const fullHistory = [systemInstruction, ...contents];
+
+        try {
+            // AQUI ESTÁ EL CAMBIO: Llamamos a nuestra propia API en Vercel
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    history: fullHistory,
+                    model: state.config.aiModel || 'gemini-1.5-flash'
+                })
+            });
+
+            const statusDot = document.getElementById('ai-status-dot');
+            
+            if (!response.ok) { 
+                const errorData = await response.json();
+                console.error("Error API:", errorData);
+                if (statusDot) statusDot.classList.replace('online', 'offline');
+                return `Error: ${errorData.error || 'Error desconocido'}`;
+            }
+            
+            if (statusDot) statusDot.classList.replace('offline', 'online');
+            
+            const data = await response.json();
+            
+            if (data.candidates?.length > 0) { 
+                return data.candidates[0]?.content?.parts[0]?.text || "No pude procesar la respuesta."; 
+            } else { 
+                return "Recibí una respuesta inesperada."; 
+            }
+        } catch (error) { 
+            console.error('Error en getGeminiResponse:', error); 
+            const statusDot = document.getElementById('ai-status-dot'); 
+            if (statusDot) statusDot.classList.replace('online', 'offline'); 
+            return `Error al conectar con el servidor.`; 
+        }
+    }
+
+        // --- FUNCIÓN PARA ACTUALIZAR VISIBILIDAD DEL CHAT ---
+        function updateChatVisibility() {
+            const chatEl = document.getElementById("chat-ui-container");
+            
+            if (state.config.chatEnabled && state.currentView === 'user') {
+                // Si el chat está habilitado y estamos en vista de usuario, renderizar el chat
+                if (!document.getElementById('chat-fab')) {
+                    renderChatUI(chatEl);
+                }
+            } else {
+                // Si el chat está deshabilitado, ocultarlo
+                chatEl.innerHTML = '';
+            }
+        }
+        
+        // --- FUNCIONES DE EXPORTACIÓN ---
+        function exportTicketsPDF() {
+            const ticketsToExport = state.filteredTickets || state.tickets;
+            if (!ticketsToExport || ticketsToExport.length === 0) { showToast("No hay tickets para exportar.", "info"); return; }
+            try {
+                const { jsPDF } = window.jspdf; 
+                const doc = new jsPDF();
+                doc.setFontSize(18); 
+                doc.text("Reporte de Tickets - Soporte", 14, 22);
+                doc.setFontSize(11); 
+                doc.setTextColor(100); 
+                doc.text(`Generado el: ${new Date().toLocaleString()}`, 14, 29);
+                const ticketData = ticketsToExport.map(t => [ t.folio || 'N/A', t.usuarioNombre || 'N/A', t.asunto || 'N/A', t.estado || 'N/A', t.agente || 'N/A', t.createdAt ? t.createdAt.toDate().toLocaleDateString() : 'N/A' ]);
+                doc.autoTable({ 
+                    startY: 35, 
+                    head: [['Folio', 'Usuario', 'Asunto', 'Estado', 'Agente', 'Creado']], 
+                    body: ticketData, 
+                    theme: 'striped', 
+                    headStyles: { fillColor: [60, 60, 60] },
+                    didDrawPage: function (data) { 
+                        doc.setFontSize(10); 
+                        doc.setTextColor(150); 
+                        doc.text('Página ' + doc.internal.getNumberOfPages(), data.settings.margin.left, doc.internal.pageSize.height - 10); 
+                    }
+                });
+                doc.save(`reporte_tickets_${new Date().toISOString().split('T')[0]}.pdf`);
+                showToast("Reporte PDF generado.", "success");
+            } catch (e) { 
+                console.error("Error generando PDF:", e); 
+                showToast("Error al generar el PDF.", "error"); 
+            }
+        }
+
+        // --- FUNCIONES DE CARGA DE DATOS MEJORADAS ---
+        function loadUserTickets(userEmail) {
+            if (state.listeners.tickets) state.listeners.tickets();
+            
+            const q = dbFunctions.query(
+                dbFunctions.collection(firebaseDb, "tickets"),
+                dbFunctions.where("usuarioEmail", "==", userEmail)
+            );
+            
+            state.listeners.tickets = dbFunctions.onSnapshot(q, (querySnapshot) => {
+                console.log("🔄 Tickets actualizados (Usuario):", querySnapshot.docs.length);
+                state.tickets = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                updateLastSyncTime();
+                
+                if (state.currentView === 'user') {
+                    updateUserUI();
+                }
+            }, (error) => console.error("Error cargando tickets (usuario):", error));
+        }
+
+        // Hacer loadAllTickets globalmente accesible
+        window.loadAllTickets = loadAllTickets;
+
+        function loadAllUsers() {
+            if (state.listeners.users) state.listeners.users();
+            
+            const q = dbFunctions.query(dbFunctions.collection(firebaseDb, "users"));
+            state.listeners.users = dbFunctions.onSnapshot(q, (querySnapshot) => {
+                console.log("👥 Usuarios actualizados:", querySnapshot.docs.length);
+                state.users = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                if (state.currentView === 'agent' && state.currentAgentTab === 'users') {
+                    updateAgentUsersTab();
+                }
+            }, (error) => console.error("Error cargando usuarios:", error));
+        }
+
+        function loadComments(ticketId) {
+            detachCommentListener(ticketId);
+
+            const commentsRef = dbFunctions.collection(firebaseDb, "tickets", ticketId, "comments");
+            const q = dbFunctions.query(commentsRef);
+            
+            state.listeners.comments[ticketId] = dbFunctions.onSnapshot(q, (querySnapshot) => {
+                console.log(`💬 Comentarios actualizados para ticket ${ticketId}`);
+                state.comments[ticketId] = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                const commentsListEl = document.getElementById('comments-list');
+                if (commentsListEl) {
+                    commentsListEl.innerHTML = state.comments[ticketId]
+                        .sort((a, b) => {
+                            const dateA = a.createdAt ? a.createdAt.toDate() : new Date();
+                            const dateB = b.createdAt ? b.createdAt.toDate() : new Date();
+                            return dateA - dateB;
+                        })
+                        .map(c => `
+                        <div class="p-3 rounded-md ${c.autorId === state.currentUser.uid ? "bg-[var(--color-border)]" : "bg-[var(--color-surface)]"}">
+                            <p class="whitespace-pre-wrap">${c.mensaje}</p>
+                            <p class="text-xs text-right mt-1 text-[var(--color-text-secondary)]">
+                                ${c.autorNombre} - ${c.createdAt ? c.createdAt.toDate().toLocaleString() : 'Enviando...'}
+                            </p>
+                        </div>`).join("");
+                }
+            }, (error) => console.error(`Error cargando comentarios para ${ticketId}:`, error));
+        }
+        
+        function detachCommentListener(ticketId) {
+            if (state.listeners.comments[ticketId]) {
+                state.listeners.comments[ticketId]();
+                delete state.listeners.comments[ticketId];
+                console.log(`💬 Listener de comentarios detenido para ${ticketId}`);
+            }
+        }
+
+        // ==================================================
+        // 🚨 NUEVAS FUNCIONES MEJORADAS IMPLEMENTADAS
+        // ==================================================
+
+        // --- SISTEMA DE NOTIFICACIONES EN TIEMPO REAL ---
+        function initNotificationSystem() {
+            // Notificaciones push nativas del navegador
+            function requestNotificationPermission() {
+                if ("Notification" in window && Notification.permission === "default") {
+                    Notification.requestPermission().then(permission => {
+                        if (permission === "granted") {
+                            console.log("🔔 Permisos de notificación concedidos");
+                        }
+                    });
+                }
+            }
+            
+            // Notificación para nuevos tickets (agentes)
+            function notifyNewTicket(ticket) {
+                if (state.userData?.rol === 'agente' && Notification.permission === "granted") {
+                    new Notification(`Nuevo Ticket: ${ticket.folio}`, {
+                        body: `Asunto: ${ticket.asunto}\nUsuario: ${ticket.usuarioNombre}`,
+                        icon: state.config.logo || '/default-icon.png',
+                        tag: 'new-ticket'
+                    });
+                }
+            }
+            
+            // Notificación para actualizaciones (usuarios)
+            function notifyTicketUpdate(ticket, cambios) {
+                if (state.currentUser?.email === ticket.usuarioEmail && Notification.permission === "granted") {
+                    new Notification(`Actualización: ${ticket.folio}`, {
+                        body: `Estado: ${ticket.estado}\nCambios: ${cambios}`,
+                        icon: state.config.logo || '/default-icon.png',
+                        tag: 'ticket-update'
+                    });
+                }
+            }
+            
+            requestNotificationPermission();
+            return { notifyNewTicket, notifyTicketUpdate };
+        }
+
+        // --- DASHBOARD INTERACTIVO CON GRÁFICOS ---
+        function renderInteractiveCharts() {
+            if (typeof Chart === 'undefined') {
+                console.warn("Chart.js no está disponible");
+                return;
+            }
+            
+            // Gráfico de estados de tickets
+            const statusCtx = document.getElementById('tickets-status-chart');
+            if (statusCtx) {
+                const statusCounts = {
+                    'NUEVO': state.tickets.filter(t => t.estado === 'NUEVO').length,
+                    'EN PROGRESO': state.tickets.filter(t => t.estado === 'EN PROGRESO').length,
+                    'EN ESPERA': state.tickets.filter(t => t.estado === 'EN ESPERA').length,
+                    'RESUELTO': state.tickets.filter(t => t.estado === 'RESUELTO').length,
+                    'CERRADO': state.tickets.filter(t => t.estado === 'CERRADO').length
+                };
+                
+                new Chart(statusCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(statusCounts),
+                        datasets: [{
+                            data: Object.values(statusCounts),
+                            backgroundColor: ['#3B82F6', '#F59E0B', '#6B7280', '#10B981', '#EF4444']
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'bottom' },
+                            title: {
+                                display: true,
+                                text: 'Distribución por Estado'
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // --- SISTEMA DE PLANTILLAS DE RESPUESTA ---
+        const responseTemplates = {
+            "saludo": {
+                nombre: "Saludo Inicial",
+                contenido: "Hola [usuario], hemos recibido tu ticket y lo estamos revisando. Te mantendremos informado."
+            },
+            "espera": {
+                nombre: "En Espera de Información",
+                contenido: "Estimado [usuario], necesitamos información adicional para poder ayudarte. Por favor proporciona: [detalles]"
+            },
+            "resuelto": {
+                nombre: "Ticket Resuelto",
+                contenido: "Hola [usuario], hemos resuelto tu solicitud. Si necesitas más ayuda, no dudes en contactarnos."
+            },
+            "seguimiento": {
+                nombre: "Seguimiento",
+                contenido: "Solo queríamos informarte que tu ticket [folio] sigue en progreso. Te actualizaremos pronto."
+            }
+        };
+
+        function initTemplateSystem() {
+            function applyTemplate(templateKey, ticket) {
+                const template = responseTemplates[templateKey];
+                if (!template) return '';
+                
+                return template.contenido
+                    .replace('[usuario]', ticket.usuarioNombre || 'usuario')
+                    .replace('[folio]', ticket.folio || '')
+                    .replace('[detalles]', 'los detalles específicos del problema');
+            }
+            
+            function showTemplateSelector(ticketId = null) {
+                const modal = document.getElementById("modal-container");
+                modal.innerHTML = `
+                    <div class="card-surface w-full max-w-md fade-in">
+                        <div class="p-6 border-b border-[var(--color-border)]">
+                            <h2 class="text-xl font-bold">Plantillas de Respuesta</h2>
+                        </div>
+                        <div class="p-6 space-y-3 max-h-96 overflow-y-auto">
+                            ${Object.entries(responseTemplates).map(([key, template]) => `
+                                <button class="w-full text-left p-3 rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-surface-secondary)] transition-colors template-card template-btn" data-key="${key}">
+                                    <div class="font-medium">${template.nombre}</div>
+                                    <div class="text-sm text-[var(--color-text-secondary)] mt-1">${template.contenido.substring(0, 80)}...</div>
+                                </button>
+                            `).join('')}
+                        </div>
+                        <div class="p-6 border-t border-[var(--color-border)]">
+                            <button id="close-template-modal" class="btn-secondary w-full">Cerrar</button>
+                        </div>
+                    </div>`;
+                
+                modal.classList.remove("hidden");
+                modal.classList.add("flex");
+                
+                document.querySelectorAll('.template-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const templateKey = btn.dataset.key;
+                        let commentText = '';
+                        
+                        if (ticketId) {
+                            const ticket = state.tickets.find(t => t.id === ticketId);
+                            commentText = applyTemplate(templateKey, ticket);
+                        } else {
+                            // Plantilla genérica
+                            commentText = responseTemplates[templateKey].contenido.replace('[usuario]', 'usuario').replace('[folio]', '');
+                        }
+                        
+                        // Llenar el formulario de comentarios si está abierto
+                        const commentForm = document.querySelector('#comment-form textarea');
+                        if (commentForm) {
+                            commentForm.value = commentText;
+                            commentForm.focus();
+                        }
+                        
+                        closeModal();
+                    });
+                });
+                
+                document.getElementById('close-template-modal').addEventListener('click', closeModal);
+            }
+            
+            return { showTemplateSelector, applyTemplate };
+        }
+
+        // --- BÚSQUEDA AVANZADA Y FILTROS ---
+        function initAdvancedSearch() {
+            function searchTickets(query, filters = {}) {
+                let results = [...state.tickets];
+                
+                // Búsqueda por texto
+                if (query) {
+                    const searchTerms = query.toLowerCase().split(' ');
+                    results = results.filter(ticket => {
+                        const searchableText = `
+                            ${ticket.folio} ${ticket.asunto} ${ticket.descripcion} 
+                            ${ticket.usuarioNombre} ${ticket.usuarioEmail} ${ticket.agente}
+                        `.toLowerCase();
+                        
+                        return searchTerms.every(term => searchableText.includes(term));
+                    });
+                }
+                
+                // Aplicar filtros
+                if (filters.estado && filters.estado !== 'TODOS') {
+                    results = results.filter(t => t.estado === filters.estado);
+                }
+                
+                if (filters.urgencia && filters.urgencia !== 'TODAS') {
+                    results = results.filter(t => t.urgencia === filters.urgencia);
+                }
+                
+                if (filters.categoria && filters.categoria !== 'TODAS') {
+                    results = results.filter(t => t.categoria === filters.categoria);
+                }
+                
+                if (filters.fechaDesde) {
+                    const desde = new Date(filters.fechaDesde);
+                    results = results.filter(t => t.createdAt?.toDate() >= desde);
+                }
+                
+                if (filters.fechaHasta) {
+                    const hasta = new Date(filters.fechaHasta);
+                    hasta.setHours(23, 59, 59, 999);
+                    results = results.filter(t => t.createdAt?.toDate() <= hasta);
+                }
+                
+                return results;
+            }
+            
+            function renderSearchInterface(containerId) {
+                const container = document.getElementById(containerId);
+                if (!container) return;
+                
+                const categorias = [...new Set(state.tickets.map(t => t.categoria).filter(Boolean))];
+                
+                container.innerHTML = `
+                    <div class="card-surface mb-4">
+                        <div class="flex flex-col md:flex-row gap-4 items-end">
+                            <div class="flex-1">
+                                <label class="label-style">Buscar</label>
+                                <input type="text" id="search-input" placeholder="Buscar en tickets..." class="input-style w-full">
+                            </div>
+                            <div>
+                                <label class="label-style">Estado</label>
+                                <select id="filter-estado" class="input-style">
+                                    <option value="TODOS">Todos los estados</option>
+                                    ${["NUEVO", "EN PROGRESO", "EN ESPERA", "RESUELTO", "CERRADO"]
+                                        .map(estado => `<option value="${estado}">${estado}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="label-style">Urgencia</label>
+                                <select id="filter-urgencia" class="input-style">
+                                    <option value="TODAS">Todas</option>
+                                    <option value="Baja">Baja</option>
+                                    <option value="Media">Media</option>
+                                    <option value="Alta">Alta</option>
+                                </select>
+                            </div>
+                            <div>
+                                <button id="clear-filters" class="btn-secondary">Limpiar</button>
+                            </div>
+                        </div>
+                        <div class="flex flex-col md:flex-row gap-4 mt-4">
+                            <div>
+                                <label class="label-style">Categoría</label>
+                                <select id="filter-categoria" class="input-style">
+                                    <option value="TODAS">Todas</option>
+                                    ${categorias.map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="label-style">Desde</label>
+                                <input type="date" id="filter-fecha-desde" class="input-style">
+                            </div>
+                            <div>
+                                <label class="label-style">Hasta</label>
+                                <input type="date" id="filter-fecha-hasta" class="input-style">
+                            </div>
+                        </div>
+                    </div>`;
+                
+                // Event listeners para búsqueda en tiempo real
+                const searchInput = document.getElementById('search-input');
+                const filters = ['filter-estado', 'filter-urgencia', 'filter-categoria', 'filter-fecha-desde', 'filter-fecha-hasta'];
+                
+                const performSearch = () => {
+                    const query = searchInput.value;
+                    const filterValues = {
+                        estado: document.getElementById('filter-estado').value,
+                        urgencia: document.getElementById('filter-urgencia').value,
+                        categoria: document.getElementById('filter-categoria').value,
+                        fechaDesde: document.getElementById('filter-fecha-desde').value,
+                        fechaHasta: document.getElementById('filter-fecha-hasta').value
+                    };
+                    
+                    const results = searchTickets(query, filterValues);
+                    updateSearchResults(results);
+                };
+                
+                searchInput.addEventListener('input', performSearch);
+                filters.forEach(filterId => {
+                    document.getElementById(filterId)?.addEventListener('change', performSearch);
+                });
+                
+                document.getElementById('clear-filters').addEventListener('click', () => {
+                    searchInput.value = '';
+                    filters.forEach(filterId => {
+                        const element = document.getElementById(filterId);
+                        if (element) element.value = element.tagName === 'SELECT' ? 
+                            (filterId === 'filter-estado' ? 'TODOS' : 'TODAS') : '';
+                    });
+                    performSearch();
+                });
+                
+                // Ejecutar búsqueda inicial
+                performSearch();
+            }
+            
+            function updateSearchResults(results) {
+                state.filteredTickets = results;
+                
+                // Actualizar la interfaz según el contexto actual
+                if (state.currentView === 'agent') {
+                    updateAgentDashboard();
+                } else if (state.currentView === 'user') {
+                    updateUserUI();
+                }
+                
+                // Mostrar contador de resultados
+                const searchInterface = document.getElementById('search-interface');
+                if (searchInterface) {
+                    const existingCounter = searchInterface.querySelector('.results-counter');
+                    if (existingCounter) existingCounter.remove();
+                    
+                    const counter = document.createElement('div');
+                    counter.className = 'results-counter text-sm text-[var(--color-text-secondary)] mt-2';
+                    counter.textContent = `Mostrando ${results.length} de ${state.tickets.length} tickets`;
+                    searchInterface.appendChild(counter);
+                }
+            }
+            
+            return { renderSearchInterface, searchTickets };
+        }
+
+        // --- SISTEMA DE RECORDATORIOS AUTOMÁTICOS ---
+        function initReminderSystem() {
+            function checkPendingReminders() {
+                const now = new Date();
+                const pendingTickets = state.tickets.filter(ticket => 
+                    ticket.estado !== 'RESUELTO' && 
+                    ticket.estado !== 'CERRADO' &&
+                    ticket.fechaCompromiso
+                );
+                
+                pendingTickets.forEach(ticket => {
+                    const compromiso = ticket.fechaCompromiso.toDate();
+                    const diffHours = (compromiso - now) / (1000 * 60 * 60);
+                    
+                    // Recordatorio 24 horas antes
+                    if (diffHours > 0 && diffHours <= 24) {
+                        showReminderNotification(ticket, '24_horas');
+                    }
+                    
+                    // Recordatorio 1 hora antes (solo para alta urgencia)
+                    if (diffHours > 0 && diffHours <= 1 && ticket.urgencia === 'Alta') {
+                        showReminderNotification(ticket, '1_hora');
+                    }
+                    
+                    // Ticket vencido
+                    if (diffHours < 0) {
+                        showReminderNotification(ticket, 'vencido');
+                    }
+                });
+            }
+            
+            function showReminderNotification(ticket, tipo) {
+                const messages = {
+                    '24_horas': `Ticket ${ticket.folio} vence en 24 horas`,
+                    '1_hora': `Ticket ${ticket.folio} URGENTE - vence en 1 hora`,
+                    'vencido': `Ticket ${ticket.folio} VENCIDO - requiere atención inmediata`
+                };
+                
+                if (Notification.permission === 'granted') {
+                    new Notification(messages[tipo], {
+                        body: `Asunto: ${ticket.asunto}\nAgente: ${ticket.agente || 'Sin asignar'}`,
+                        icon: state.config.logo,
+                        tag: `reminder-${ticket.id}`
+                    });
+                }
+                
+                // También mostrar toast
+                showToast(messages[tipo], tipo === 'vencido' ? 'error' : 'warning');
+            }
+            
+            // Ejecutar cada hora
+            setInterval(checkPendingReminders, 60 * 60 * 1000);
+            checkPendingReminders(); // Ejecutar inmediatamente al cargar
+            
+            return { checkPendingReminders };
+        }
+
+        // --- INDICADORES DE ESTADO ---
+        function renderStatusIndicators() {
+            const ticketsCount = state.tickets.length;
+            const pendingTickets = state.tickets.filter(t => 
+                t.estado !== 'RESUELTO' && t.estado !== 'CERRADO'
+            ).length;
+            
+            return `
+                <div class="flex flex-wrap items-center gap-4 text-sm">
+                    <div class="flex items-center gap-2">
+                        <div class="indicator-dot online"></div>
+                        <span>Sistema Online</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="indicator-dot ${pendingTickets > 0 ? 'warning' : 'online'}"></div>
+                        <span>Tickets: ${ticketsCount} (${pendingTickets} pendientes)</span>
+                    </div>
+                    ${state.lastUpdate ? `
+                    <div class="flex items-center gap-2">
+                        <div class="indicator-dot offline"></div>
+                        <span>Actualizado: ${state.lastUpdate.toLocaleTimeString()}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // --- SISTEMA DE RESPALDO AUTOMÁTICO ---
+        function initBackupSystem() {
+            async function exportBackup() {
+                try {
+                    const backupData = {
+                        timestamp: new Date().toISOString(),
+                        tickets: state.tickets,
+                        users: state.users,
+                        config: state.config,
+                        kpis: state.kpis,
+                        version: "1.0"
+                    };
+                    
+                    const blob = new Blob([JSON.stringify(backupData, null, 2)], { 
+                        type: 'application/json' 
+                    });
+                    
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `backup_lumosticket_${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    showToast('Respaldo exportado correctamente', 'success');
+                } catch (error) {
+                    console.error('Error en respaldo:', error);
+                    showToast('Error al exportar respaldo', 'error');
+                }
+            }
+            
+            return { exportBackup };
+        }
+
+        // --- BASE DE CONOCIMIENTO INTELIGENTE ---
+        function mostrarBaseConocimiento() {
+            const modal = document.getElementById("modal-container");
+            
+            modal.innerHTML = `
+                <div class="card-surface w-full max-w-4xl fade-in">
+                    <div class="p-6 border-b border-[var(--color-border)] flex justify-between items-center">
+                        <h2 class="text-xl font-bold">Base de Conocimiento</h2>
+                        <button id="close-modal-btn" class="text-2xl hover:text-red-500 transition-colors">&times;</button>
+                    </div>
+                    <div class="p-6 max-h-[80vh] overflow-y-auto">
+                        <div class="mb-4">
+                            <input type="text" id="buscar-solucion-input" placeholder="🔍 Buscar solución..." class="input-style w-full">
+                        </div>
+                        <div id="resultados-base-conocimiento" class="space-y-4">
+                            <!-- Las soluciones se cargarán aquí -->
+                        </div>
+                    </div>
+                </div>`;
+            
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+            
+            // Cargar soluciones de ejemplo
+            const baseConocimiento = {
+                "soluciones": [
+                    {
+                        "patrones": ["no imprime", "error impresora", "impresora no funciona"],
+                        "solucion": "Problema de conexión de impresora",
+                        "pasos": [
+                            "Verificar que la impresora esté encendida y conectada a la red",
+                            "Reiniciar el servicio de impresión en Windows (services.msc)",
+                            "Reinstalar drivers de la impresora",
+                            "Verificar cola de impresión y limpiar trabajos atascados"
+                        ],
+                        "categoria": "Hardware",
+                        "tiempo_estimado": "15-30 min"
+                    },
+                    {
+                        "patrones": ["correo no envia", "error outlook", "no puedo enviar emails"],
+                        "solucion": "Configuración de correo electrónico",
+                        "pasos": [
+                            "Verificar conexión a Internet",
+                            "Revisar configuración SMTP en Outlook",
+                            "Verificar que no haya llegado al límite de envío diario",
+                            "Contactar al administrador de correo"
+                        ],
+                        "categoria": "Software",
+                        "tiempo_estimado": "10-20 min"
+                    }
+                ]
+            };
+            
+            function renderSoluciones(soluciones) {
+                const container = document.getElementById('resultados-base-conocimiento');
+                container.innerHTML = soluciones.map(sol => `
+                    <div class="card-secondary">
+                        <h3 class="font-bold text-lg">${sol.solucion}</h3>
+                        <p class="text-sm text-[var(--color-text-secondary)]">Categoría: ${sol.categoria} • Tiempo: ${sol.tiempo_estimado}</p>
+                        <ul class="list-disc list-inside mt-2 space-y-1">
+                            ${sol.pasos.map(paso => `<li class="text-sm">${paso}</li>`).join('')}
+                        </ul>
+                    </div>
+                `).join('');
+            }
+            
+            // Renderizar inicialmente
+            renderSoluciones(baseConocimiento.soluciones);
+            
+            // Búsqueda en tiempo real
+            document.getElementById('buscar-solucion-input').addEventListener('input', (e) => {
+                const termino = e.target.value.toLowerCase();
+                const resultados = baseConocimiento.soluciones.filter(sol =>
+                    sol.patrones.some(patron => patron.includes(termino)) ||
+                    sol.solucion.toLowerCase().includes(termino) ||
+                    sol.categoria.toLowerCase().includes(termino)
+                );
+                
+                renderSoluciones(resultados.length > 0 ? resultados : baseConocimiento.soluciones);
+            });
+            
+            document.getElementById('close-modal-btn').addEventListener('click', closeModal);
+        }
+
+        // --- REPORTE EJECUTIVO MEJORADO ---
+        async function mostrarReporteEjecutivo() {
+            const modal = document.getElementById("modal-container");
+            
+            modal.innerHTML = `
+                <div class="card-surface modal-reporte-ejecutivo fade-in">
+                    <div class="p-6 border-b border-[var(--color-border)] flex justify-between items-center">
+                        <h2 class="text-xl font-bold">Reporte Ejecutivo - Soporte Técnico</h2>
+                        <button id="close-modal-btn" class="text-2xl hover:text-red-500 transition-colors">&times;</button>
+                    </div>
+                    <div class="modal-reporte-content p-6">
+                        <div class="loading-container">
+                            <div class="spinner"></div>
+                            <p>Generando reporte ejecutivo...</p>
+                        </div>
+                    </div>
+                </div>`;
+            
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+            
+            // Generar reporte en segundo plano
+            setTimeout(async () => {
+                try {
+                    const reporte = await generarReporteEjecutivo();
+                    
+                    // Verificar que el modal aún esté abierto antes de actualizar
+                    const contentEl = document.querySelector('.modal-reporte-content');
+                    if (!contentEl) return; // El modal se cerró
+                    
+                    contentEl.innerHTML = `
+                        <div class="space-y-6">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="kpi-card">
+                                    <h2 class="kpi-title">Total Tickets</h2>
+                                    <p class="kpi-value">${reporte.metricas.totalTickets}</p>
+                                </div>
+                                <div class="kpi-card">
+                                    <h2 class="kpi-title">Tiempo Promedio</h2>
+                                    <p class="kpi-value">${reporte.metricas.tiempoPromedioResolucion}</p>
+                                </div>
+                                <div class="kpi-card">
+                                    <h2 class="kpi-title">Satisfacción</h2>
+                                    <p class="kpi-value">${reporte.metricas.satisfaccionUsuarios}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="card-surface">
+                                <h3 class="text-lg font-bold mb-3">📈 Insights Clave</h3>
+                                <ul class="list-disc list-inside space-y-2">
+                                    ${reporte.insights.map(insight => `<li class="text-[var(--color-text-primary)]">${insight}</li>`).join('')}
+                                </ul>
+                            </div>
+                            
+                            <div class="card-surface">
+                                <h3 class="text-lg font-bold mb-3">🎯 Recomendaciones</h3>
+                                <ul class="list-disc list-inside space-y-2">
+                                    ${reporte.recomendaciones.map(rec => `<li class="text-[var(--color-text-primary)]">${rec}</li>`).join('')}
+                                </ul>
+                            </div>
+                            
+                            <div class="flex gap-4">
+                                <button id="exportar-reporte-btn" class="btn-primary">Exportar PDF</button>
+                                <button id="programar-reporte-btn" class="btn-secondary">Programar Envío</button>
+                            </div>
+                        </div>`;
+                        
+                    document.getElementById('exportar-reporte-btn').addEventListener('click', () => exportarReportePDF(reporte));
+                    document.getElementById('programar-reporte-btn').addEventListener('click', programarEnvioReporte);
+                } catch (error) {
+                    console.error("Error generando reporte:", error);
+                    const contentEl = document.querySelector('.modal-reporte-content');
+                    if (contentEl) {
+                        contentEl.innerHTML = `<p class="text-center text-red-500">Error al generar el reporte: ${error.message}</p>`;
+                    }
+                }
+            }, 2000);
+            
+            document.getElementById('close-modal-btn').addEventListener('click', closeModal);
+        }
+
+        async function generarReporteEjecutivo() {
+            // Simulación de métricas - en una implementación real calcularías estos valores
+            const metricas = {
+                totalTickets: state.tickets.length,
+                ticketsResueltos: state.tickets.filter(t => t.estado === "RESUELTO").length,
+                tiempoPromedioResolucion: "2.5 horas",
+                satisfaccionUsuarios: "4.2/5.0",
+                ticketsPorAgente: await calcularTicketsPorAgente(),
+                categoriasMasComunes: await calcularCategoriasMasComunes()
+            };
+
+            const insights = [
+                "El 65% de los tickets se resuelven en menos de 4 horas",
+                "La categoría 'Software' representa el 45% del volumen total",
+                "Los tickets de 'Alta' urgencia tienen un tiempo de respuesta promedio de 1.2 horas"
+            ];
+
+            const recomendaciones = [
+                "Implementar capacitación en la categoría 'Software' para reducir tiempos de resolución",
+                "Establecer SLAs más estrictos para tickets de alta urgencia",
+                "Crear base de conocimiento para problemas recurrentes en 'Hardware'"
+            ];
+
+            return {
+                periodo: new Date().toLocaleDateString(),
+                metricas,
+                insights,
+                recomendaciones,
+                tendencias: {
+                    volumen: "Estable",
+                    tiempoResolucion: "Mejorando",
+                    satisfaccion: "Mejorando"
+                }
+            };
+        }
+
+        async function calcularTicketsPorAgente() {
+            const agentes = {};
+            state.tickets.forEach(ticket => {
+                if (ticket.agente) {
+                    agentes[ticket.agente] = (agentes[ticket.agente] || 0) + 1;
+                }
+            });
+            return agentes;
+        }
+
+        async function calcularCategoriasMasComunes() {
+            const categorias = {};
+            state.tickets.forEach(ticket => {
+                const cat = ticket.categoria || 'Sin categoría';
+                categorias[cat] = (categorias[cat] || 0) + 1;
+            });
+            
+            // Ordenar por frecuencia
+            return Object.entries(categorias)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .reduce((obj, [key, value]) => {
+                    obj[key] = value;
+                    return obj;
+                }, {});
+        }
+
+        function exportarReportePDF(reporte) {
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                doc.setFontSize(20);
+                doc.text("Reporte Ejecutivo - Soporte Técnico", 20, 30);
+                doc.setFontSize(12);
+                doc.text(`Generado: ${new Date().toLocaleString()}`, 20, 45);
+                
+                let yPosition = 60;
+                
+                // Métricas
+                doc.setFontSize(16);
+                doc.text("Métricas Clave", 20, yPosition);
+                yPosition += 10;
+                
+                doc.setFontSize(10);
+                Object.entries(reporte.metricas).forEach(([key, value], index) => {
+                    if (yPosition > 250) {
+                        doc.addPage();
+                        yPosition = 20;
+                    }
+                    doc.text(`${key}: ${value}`, 25, yPosition + (index * 7));
+                });
+                
+                yPosition += Object.keys(reporte.metricas).length * 7 + 15;
+                
+                // Insights
+                if (yPosition > 200) {
+                    doc.addPage();
+                    yPosition = 20;
+                }
+                
+                doc.setFontSize(16);
+                doc.text("Insights", 20, yPosition);
+                yPosition += 10;
+                
+                doc.setFontSize(10);
+                reporte.insights.forEach((insight, index) => {
+                    if (yPosition > 250) {
+                        doc.addPage();
+                        yPosition = 20;
+                    }
+                    doc.text(`• ${insight}`, 25, yPosition + (index * 7));
+                });
+                
+                doc.save(`reporte_ejecutivo_${new Date().toISOString().split('T')[0]}.pdf`);
+                showToast("Reporte exportado correctamente", "success");
+                
+            } catch (error) {
+                console.error("Error exportando reporte:", error);
+                showToast("Error al exportar reporte", "error");
+            }
+        }
+
+        function programarEnvioReporte() {
+            showToast("Función de programación de reportes próximamente", "info");
+        }
+
+        // ==================================================
+        // 🎯 INICIALIZACIÓN DE NUEVOS SISTEMAS
+        // ==================================================
+
+        // Inicializar todos los sistemas
+        window.notificationSystem = initNotificationSystem();
+        window.templateSystem = initTemplateSystem();
+        window.advancedSearch = initAdvancedSearch();
+        window.reminderSystem = initReminderSystem();
+        window.backupSystem = initBackupSystem();
+
+        // --- FUNCIÓN DE INICIALIZACIÓN Y AUTH MEJORADA ---
+        
+        authFunctions.onAuthStateChanged(async (user) => {
+            // Limpiar intervalo de sincronización anterior
+            if (state.syncInterval) {
+                clearInterval(state.syncInterval);
+            }
+            
+            if (user) {
+                console.log("👤 Usuario autenticado:", user.uid, user.email);
+                state.currentUser = user;
+                
+                const userRef = dbFunctions.doc(firebaseDb, "users", user.uid);
+                const userSnap = await dbFunctions.getDoc(userRef);
+                
+                if (userSnap.exists()) {
+                    state.userData = userSnap.data();
+                    console.log("📊 Datos de usuario (Firestore):", state.userData);
+                    
+                    if (state.userData.rol === 'agente') {
+                        state.currentView = 'agent';
+                        loadAllTickets();
+                        loadAllUsers();
+                    } else {
+                        state.currentView = 'user';
+                        loadUserTickets(user.email);
+                    }
+                    
+                    // Iniciar sincronización automática
+                    startSyncInterval();
+                    
+                } else {
+                    console.log("❌ Usuario no encontrado en Firestore, redirigiendo a login...");
+                    await authFunctions.signOut();
+                    state.currentView = 'login';
+                }
+                
+            } else {
+                console.log("👤 Usuario desconectado.");
+                state.currentUser = null;
+                state.userData = null;
+                state.currentView = 'login';
+            }
+            
+            await loadConfig();
+            renderApp();
+        });
+
+        async function loadConfig() {
+            if (state.listeners.config) state.listeners.config();
+            
+            const configRef = dbFunctions.doc(firebaseDb, "config", "main");
+            
+            state.listeners.config = dbFunctions.onSnapshot(configRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    console.log("⚙️ Configuración cargada/actualizada.");
+                    state.config = docSnap.data();
+                    applyTheme(state.config.theme);
+                    
+                    // ACTUALIZAR VISIBILIDAD DEL CHAT CUANDO CAMBIE LA CONFIGURACIÓN
+                    updateChatVisibility();
+                } else {
+                    console.warn("⚠️ No se encontró 'config/main'. Creando con defaults.");
+                    applyTheme('Gris');
+                    dbFunctions.setDoc(configRef, {
+                        theme: 'Gris',
+                        logo: '',
+                        aiApiKey: '',
+                        aiModel: 'gemini-1.5-flash',
+                        folioNextNum: 1,
+                        folioTemplate: 'TICKET',
+                        categories: ['General', 'Hardware', 'Software', 'Redes'],
+                        chatEnabled: true // Valor por defecto: habilitado
+                    });
+                }
+            }, (error) => {
+                console.error("❌ Error cargando config:", error);
+                showToast("Error crítico: no se pudo cargar la configuración.", "error");
+            });
+        }
+
+    </script>
+
+<!-- INYECCIÓN: Indicadores IA, mejoras de Reporte Ejecutivo y cierre ESC robusto -->
+<script>
+// Inicializar estado global de IA si no existe
+window.appState = window.appState || { iaActive: true };
+
+// Clase y estilos para indicador IA
+(function addIAStyles(){
+  const css = `
+  .ia-indicator { display:inline-block; width:10px; height:10px; border-radius:50%; margin-left:8px; vertical-align:middle; box-shadow:0 0 0 2px rgba(0,0,0,0.06) inset; }
+  .modal-close-btn { position: absolute; right: 12px; top: 12px; background: transparent; border: none; font-size: 1rem; cursor: pointer; }
+  `;
+  const s = document.createElement('style'); s.setAttribute('data-injected','ia-styles'); s.innerHTML = css;
+  document.head.appendChild(s);
+})();
+
+// Actualizar color de todos los indicadores IA en DOM
+function updateIAIndicators(){
+  const active = !!(window.appState && window.appState.iaActive);
+  document.querySelectorAll('.ia-indicator').forEach(el=>{
+    el.style.backgroundColor = active ? '#10B981' : '#EF4444';
+    el.title = active ? 'IA activa' : 'IA inactiva';
+  });
+}
+
+// Inserta un indicador IA dentro del header de un contenedor modal (si aplica)
+function insertIndicatorToModal(modalEl){
+  if (!modalEl) return;
+  const header = modalEl.querySelector('h2, h3');
+  if (!header) return;
+  // evitar duplicados
+  if (header.querySelector('.ia-indicator')) return;
+  const span = document.createElement('span');
+  span.className = 'ia-indicator';
+  header.appendChild(span);
+  updateIAIndicators();
+}
+
+// Monkey-patch mostrarReporteEjecutivo para asegurar datos y botón cerrar
+(function(){
+  try {
+    const original = window.mostrarReporteEjecutivo;
+    window.mostrarReporteEjecutivo = async function(...args){
+      // Forzar carga de tickets para asegurar KPIs actualizados
+      try {
+        if (typeof loadAllTickets === 'function') {
+          await loadAllTickets();
+        }
+      } catch(err){
+        console.warn("No se pudo forzar carga de tickets:", err);
+      }
+      // Ejecutar original (si existe)
+      if (typeof original === 'function') {
+        original.apply(this, args);
+      } else {
+        // fallback: crear el modal si no existe la función original
+        const modal = document.getElementById('modal-container');
+        if (modal) {
+          modal.innerHTML = '<div class="card-surface modal-reporte-ejecutivo fade-in"><div class="p-6 border-b flex justify-between items-center"><h2 class="text-xl font-bold">Reporte Ejecutivo</h2><button id="close-report" class="modal-close-btn">✕</button></div><div class="modal-reporte-content p-6"><div id="report-content"></div></div></div>';
+          modal.classList.remove('hidden'); modal.classList.add('flex');
+        }
+      }
+      // small delay to allow DOM creation
+      setTimeout(()=>{
+        const modal = document.getElementById('modal-container');
+        const content = document.getElementById('report-content');
+        // Add close button handler
+        const closeBtn = document.getElementById('close-report');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', () => { try { if (typeof closeModal === 'function') closeModal(); else { modal.classList.add('hidden'); modal.classList.remove('flex'); modal.innerHTML=''; } } catch(e){ modal.classList.add('hidden'); modal.classList.remove('flex'); modal.innerHTML=''; } });
+        }
+        // Insert IA indicator
+        if (modal) insertIndicatorToModal(modal);
+        updateIAIndicators();
+        // Ensure content shows KPIs or fallback message
+        try {
+          const k = (window.state && window.state.kpis) ? window.state.kpis : null;
+          if (content) {
+            if (k && (typeof k.total === 'number')) {
+              content.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-4 gap-4"><div class="card-secondary p-4"><h4 class="font-bold">Total Tickets</h4><p class="text-2xl">${k.total}</p></div><div class="card-secondary p-4"><h4 class="font-bold">Resueltos</h4><p class="text-2xl">${k.resueltos}</p></div><div class="card-secondary p-4"><h4 class="font-bold">Abiertos</h4><p class="text-2xl">${k.abiertos}</p></div><div class="card-secondary p-4"><h4 class="font-bold">Promedio Resolución</h4><p class="text-2xl">—</p></div></div>`;
+            } else {
+              content.innerHTML = '<p class="text-[var(--color-text-secondary)]">Sin datos disponibles</p>';
+            }
+          }
+        } catch(e){
+          if (content) content.innerHTML = '<p class="text-[var(--color-text-secondary)]">Sin datos disponibles</p>';
+        }
+      }, 150);
+    };
+  } catch(e){
+    console.error("Error parcheando mostrarReporteEjecutivo:", e);
+  }
+})();
+
+// Monkey-patch renderChatUI to add IA indicator after render
+(function(){
+  try {
+    const original = window.renderChatUI;
+    window.renderChatUI = function(container){
+      if (typeof original === 'function') original.apply(this, arguments);
+      // small timeout to mutate DOM elements inserted by original
+      setTimeout(()=>{
+        const chatWindow = document.getElementById('chat-window');
+        if (chatWindow) {
+          // insert indicator next to header title if not present
+          const header = chatWindow.querySelector('.chat-header h3');
+          if (header && !header.querySelector('.ia-indicator')) {
+            const span = document.createElement('span');
+            span.className = 'ia-indicator';
+            header.appendChild(span);
+            updateIAIndicators();
+          }
+        }
+      }, 120);
+    };
+  } catch(e){
+    console.warn("No se pudo parchear renderChatUI:", e);
+  }
+})();
+
+// Monkey-patch mostrarBaseConocimiento to add IA indicator
+(function(){
+  try {
+    const original = window.mostrarBaseConocimiento;
+    window.mostrarBaseConocimiento = function(...args){
+      if (typeof original === 'function') original.apply(this, args);
+      setTimeout(()=>{
+        const modal = document.getElementById('modal-container');
+        if (modal) insertIndicatorToModal(modal);
+        updateIAIndicators();
+      }, 120);
+    };
+  } catch(e){
+    console.warn("No se pudo parchear mostrarBaseConocimiento:", e);
+  }
+})();
+
+// Escucha ESC para cerrar modales y chat (robusto)
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' || e.key === 'Esc') {
+    // Close any open modal container
+    try {
+      const modal = document.getElementById('modal-container');
+      if (modal && !modal.classList.contains('hidden')) {
+        if (typeof closeModal === 'function') { closeModal(); }
+        else { modal.classList.add('hidden'); modal.classList.remove('flex'); modal.innerHTML = ''; }
+      }
+    } catch(err) {}
+    // Close chat if open
+    try {
+      const chat = document.querySelector('.chat-window');
+      if (chat && !chat.classList.contains('hidden')) {
+        chat.classList.add('hidden');
+      }
+    } catch(err) {}
+  }
+});
+
+// Ejecutar updateIAIndicators periódicamente y al cargar
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(updateIAIndicators, 300);
+  // Re-check every 2s to reflect changes in state if toggled elsewhere
+  setInterval(updateIAIndicators, 2000);
+});
+</script>
+<!-- FIN INYECCIÓN -->
+
+
+<style>
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.4);
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+.modal-content {
+  background: #fff;
+  padding: 20px;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+.modal-content h2 {
+  color: #1e3a8a;
+  margin-bottom: 15px;
+}
+.modal-content input {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+.modal-content button {
+  margin: 5px;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.modal-content button:first-of-type {
+  background-color: #1e3a8a;
+  color: white;
+}
+.modal-content button:last-of-type {
+  background-color: #ddd;
+}
+.forgot-link {
+  display: block;
+  margin-top: 10px;
+  text-align: center;
+  color: #1e3a8a;
+  text-decoration: underline;
+  cursor: pointer;
+}
+</style>
+
+<div id="resetModal" class="modal">
+  <div class="modal-content">
+    <h2>Restablecer contraseña</h2>
+    <input type="email" id="resetEmail" placeholder="Tu correo electrónico" required>
+    <button onclick="resetPassword()">Enviar enlace</button>
+    <button onclick="closeResetModal()">Cancelar</button>
+  </div>
+</div>
+
+<script>
+function openResetModal() {
+  document.getElementById('resetModal').style.display = 'flex';
+}
+
+function closeResetModal() {
+  document.getElementById('resetModal').style.display = 'none';
+}
+
+async function resetPassword() {
+  const email = document.getElementById('resetEmail').value.trim();
+  if (!email) return alert("Por favor ingresa tu correo.");
+  try {
+    await sendPasswordResetEmail(auth, email);
+    alert("✅ Se ha enviado un enlace a tu correo para restablecer la contraseña.");
+    closeResetModal();
+  } catch (error) {
+    console.error("Error:", error);
+    alert("❌ No se pudo enviar el enlace: " + error.message);
+  }
+}
+</script>
+
+
+<!-- === Logo Global + Panel "Logo del Sistema" === -->
+<style>
+  /* Logo flotante global */
+  #globalLogo {
+    position: fixed;
+    top: 10px;
+    left: 15px;
+    max-height: 50px;
+    z-index: 9999;
+  }
+  /* Logo centrado en login */
+  #loginLogo {
+    display: block;
+    margin: 0 auto 20px auto;
+    max-height: 80px;
+  }
+  /* Panel del logo */
+  #logoSystemPanel {
+    margin: 16px 0;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 12px;
+    background: #fff;
+    max-width: 500px;
+  }
+  #logoSystemPanel h3 {
+    font-size: 16px;
+    color: #004080;
+    margin-bottom: 10px;
+  }
+  #logoPreview { max-height: 80px; margin-bottom: 8px; display: block; }
+  .logo-input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
+  .logo-actions { margin-top: 8px; display: flex; gap: 8px; }
+  .logo-btn { background: #007bff; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+  .logo-btn.secondary { background: #6c757d; }
+  /* Toast flotante */
+  #toastContainer { position: fixed; top: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 8px; }
+  .toast-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 220px; opacity: 0.95; }
+  .toast-success { background: #28a745; }
+  .toast-error { background: #dc3545; }
+</style>
+
+<img id="globalLogo" src="https://i.ibb.co/MyywxmcV/Copilot-20251106-123908.png" alt="Logo Global">
+
+<div id="toastContainer"></div>
+
+<script>
+(async function() {
+  const defaultLogo = "https://i.ibb.co/MyywxmcV/Copilot-20251106-123908.png";
+
+  function showToast(message, type="success") {
+    const c = document.getElementById("toastContainer");
+    const el = document.createElement("div");
+    el.className = "toast-item " + (type === "success" ? "toast-success" : "toast-error");
+    el.innerHTML = (type === "success" ? "✔️ " : "⚠️ ") + message;
+    c.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+  }
+
+  async function getFirestoreInstance() {
+    if (window.firebase && firebase.firestore) return firebase.firestore();
+    if (window.getFirestore) return getFirestore();
+    throw new Error("Firestore no disponible");
+  }
+
+  async function loadLogo() {
+    try {
+      const db = await getFirestoreInstance();
+      const ref = db.collection("config").doc("main");
+      ref.onSnapshot(doc => {
+        const data = doc && doc.exists ? doc.data() : {};
+        const logo = data.logo || defaultLogo;
+        document.querySelectorAll("#globalLogo, #loginLogo").forEach(el => el.src = logo);
+      });
+    } catch(e) {
+      console.warn("Error cargando logo:", e);
+      document.querySelectorAll("#globalLogo, #loginLogo").forEach(el => el.src = defaultLogo);
+    }
+  }
+
+  async function saveLogo(url) {
+    try {
+      const db = await getFirestoreInstance();
+      await db.collection("config").doc("main").set({ logo: url }, { merge: true });
+      showToast("Logo actualizado con éxito", "success");
+    } catch(e) {
+      showToast("Error al actualizar logo", "error");
+    }
+  }
+
+  window.setupLogoPanel = function(containerId) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return;
+    cont.innerHTML = `
+      <div id="logoSystemPanel">
+        <h3>Logo del Sistema</h3>
+        <img id="logoPreview" src="${defaultLogo}" alt="Vista previa del logo">
+        <input id="logoUrlInput" class="logo-input" placeholder="Pega la URL del nuevo logo aquí">
+        <div class="logo-actions">
+          <button class="logo-btn" id="logoSaveBtn">Guardar Logo</button>
+          <button class="logo-btn secondary" id="logoResetBtn">Restablecer Predeterminado</button>
+        </div>
+      </div>`;
+
+    document.getElementById("logoSaveBtn").onclick = () => {
+      const url = document.getElementById("logoUrlInput").value.trim();
+      if (!url) return showToast("Ingresa una URL válida", "error");
+      saveLogo(url);
+    };
+    document.getElementById("logoResetBtn").onclick = () => saveLogo(defaultLogo);
+  };
+
+  document.addEventListener("DOMContentLoaded", loadLogo);
+})();
+</script>
+<!-- === Fin Logo del Sistema === -->
+
+
+<style>
+/* === Ajustes Responsive para el Panel de Agente === */
+@media (max-width: 768px) {
+  .agent-panel, #agentPanel, .panel-agente, .panel-agent {
+    width: 100% !important;
+    padding: 10px !important;
+    margin: 0 auto !important;
+    overflow-x: auto !important;
+  }
+  .agent-panel table, #agentPanel table, .panel-agente table, .panel-agent table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .agent-panel th, .agent-panel td, #agentPanel th, #agentPanel td,
+  .panel-agente th, .panel-agente td, .panel-agent th, .panel-agent td {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+  /* Botón hamburguesa para móviles */
+  #lt-agent-hamburger {
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 20px;
+    z-index: 9999;
+    display: block;
+  }
+  /* Ocultar menú lateral si existe */
+  .sidebar, #sidebar, .panel-lateral {
+    display: none;
+  }
+  .sidebar.active, #sidebar.active, .panel-lateral.active {
+    display: block !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 80%;
+    height: 100%;
+    background: #fff;
+    z-index: 9998;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.2);
+  }
+}
+@media (min-width: 769px) {
+  #lt-agent-hamburger {
+    display: none !important;
+  }
+}
+</style>
+
+<script>
+// === Función para alternar visibilidad del menú lateral en móvil ===
+document.addEventListener("DOMContentLoaded", () => {
+  const sidebar = document.querySelector('.sidebar, #sidebar, .panel-lateral');
+  if (sidebar) {
+    const btn = document.createElement("button");
+    btn.id = "lt-agent-hamburger";
+    btn.innerHTML = "☰";
+    btn.onclick = () => sidebar.classList.toggle("active");
+    document.body.appendChild(btn);
+
+    // Cerrar menú al hacer clic en una opción
+    sidebar.querySelectorAll("a, button").forEach(el => {
+      el.addEventListener("click", () => {
+        if (window.innerWidth <= 768) sidebar.classList.remove("active");
+      });
+    });
+  }
+});
+</script>
+
+</body>
+</html>

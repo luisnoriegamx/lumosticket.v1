@@ -1,0 +1,9 @@
+{
+  "name": "LumOsTicket",
+  "version": "1.0.0",
+  "description": "Portal de Soporte LumosTicket",
+  "scripts": {
+    "start": "echo 'App running'"
+  },
+  "dependencies": {}
+}
