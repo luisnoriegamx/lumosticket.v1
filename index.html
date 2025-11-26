@@ -3215,11 +3215,11 @@ async function resetPassword() {
     setTimeout(() => el.remove(), 3000);
   }
 
-  async function getFirestoreInstance() {
-    if (window.firebase && firebase.firestore) return firebase.firestore();
-    if (window.getFirestore) return getFirestore();
-    throw new Error("Firestore no disponible");
-  }
+async function getFirestoreInstance() {
+  // Usar la instancia que ya inicializaste en el módulo principal
+  if (window.firebaseDb) return window.firebaseDb; 
+  throw new Error("Firestore no disponible");
+}
 
   async function loadLogo() {
     try {
